@@ -1,0 +1,19 @@
+{
+  "name": "@herder/cloudflare-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "set -a; [ -f .env ] && . ./.env; set +a; wrangler dev --inspector-port 9229",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260312.0",
+    "typescript": "^5.8.2",
+    "wrangler": "^4.5.0"
+  }
+}
