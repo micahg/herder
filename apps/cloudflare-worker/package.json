@@ -6,14 +6,17 @@
   "scripts": {
     "dev": "set -a; [ -f .env ] && . ./.env; set +a; wrangler dev --inspector-port 9229",
     "deploy": "wrangler deploy",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "hono": "^4.7.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.13.1",
     "@cloudflare/workers-types": "^4.20260312.0",
     "typescript": "^5.8.2",
+    "vitest": "^4.1.0",
     "wrangler": "^4.5.0"
   }
 }
