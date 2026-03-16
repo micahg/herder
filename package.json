@@ -1,0 +1,13 @@
+{
+  "name": "herder",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "dev:worker": "npm run dev --workspace @herder/cloudflare-worker"
+  }
+}
