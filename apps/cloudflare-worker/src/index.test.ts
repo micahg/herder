@@ -2,6 +2,7 @@ import { SELF } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 
 const APP_SECRET = "test-app-secret";
+const VERIFY_TOKEN = "test-verify-token";
 
 async function hmacSignature(body: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -66,5 +67,46 @@ describe("POST /webhooks", () => {
       body,
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("GET /webhooks", () => {
+  it("returns challenge when mode/token are valid", async () => {
+    const challenge = "test-challenge";
+    const res = await SELF.fetch(
+      `http://localhost/webhooks?hub.mode=subscribe&hub.verify_token=${VERIFY_TOKEN}&hub.challenge=${challenge}`
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(challenge);
+  });
+
+  it("returns 400 when verify token is wrong", async () => {
+    const res = await SELF.fetch(
+      "http://localhost/webhooks?hub.mode=subscribe&hub.verify_token=wrong-token&hub.challenge=test-challenge"
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when challenge is missing", async () => {
+    const res = await SELF.fetch(
+      `http://localhost/webhooks?hub.mode=subscribe&hub.verify_token=${VERIFY_TOKEN}`
+    );
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /privacy", () => {
+  it("returns 200 with markdown privacy policy", async () => {
+    const res = await SELF.fetch("http://localhost/privacy");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+
+    const body = await res.text();
+    expect(body).toContain("# Privacy Policy");
+    expect(body).toContain("Steakholder Meating");
   });
 });
