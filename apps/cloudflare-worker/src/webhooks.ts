@@ -26,7 +26,6 @@ export function handleWebhookVerification(context: WebhookContext) {
 }
 
 export async function handleWebhookEvent(context: WebhookContext) {
-  console.log("Received webhook event");
   const rawBody = await validateAndReadRawBody(context);
   if (rawBody === null) {
     return context.body(null, 401);
@@ -59,15 +58,6 @@ export async function handleWebhookEvent(context: WebhookContext) {
       to: incomingMessage.from,
       body: outboundBody,
     });
-
-    console.log(
-      JSON.stringify({
-        type: "webhook_message_processed",
-        inboundMessageId: incomingMessage.messageId,
-        outboundMessageId,
-        inboundType: incomingMessage.type,
-      })
-    );
   } catch (error) {
     console.error("Failed to process webhook event", error);
     return context.body(null, 500);
@@ -84,40 +74,38 @@ async function validateAndReadRawBody(
     return null;
   }
 
-  // {"object":"whatsapp_business_account","entry":[{"id":"0","changes":[{"field":"messages","value":{"messaging_product":"whatsapp","metadata":{"display_phone_number":"16505551111","phone_number_id":"123456123"},"contacts":[{"profile":{"name":"test user name"},"wa_id":"16315551181","user_id":"US.13491208655302741918"}],"messages":[{"id":"ABGGFlA5Fpa","timestamp":"1504902988","from":"16315551181","from_user_id":"US.13491208655302741918","type":"text","text":{"body":"this is a text message"}}]}}]}]}
-  const rawBody = await context.req.text();
-  console.log(
-    JSON.stringify({
-      type: "request_body",
-      body: rawBody,
-    })
-  );
-
   const expectedHex = signature.slice("sha256=".length);
 
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(context.env.WHATSAPP_APP_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signatureBuffer = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    encoder.encode(rawBody)
-  );
+  try {
+    const rawBody = await context.req.text();
 
-  const computedHex = Array.from(new Uint8Array(signatureBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(context.env.WHATSAPP_APP_SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const signatureBuffer = await crypto.subtle.sign(
+      "HMAC",
+      key,
+      encoder.encode(rawBody)
+    );
 
-  if (!timingSafeEqual(encoder.encode(computedHex), encoder.encode(expectedHex))) {
+    const computedHex = Array.from(new Uint8Array(signatureBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    if (!timingSafeEqual(encoder.encode(computedHex), encoder.encode(expectedHex))) {
+      return null;
+    }
+
+    return rawBody;
+  } catch (error) {
+    console.error("Failed to validate webhook signature", error);
     return null;
   }
-
-  return rawBody;
 }
 
 function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {

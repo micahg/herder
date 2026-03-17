@@ -25,6 +25,4 @@ app.all("*", () => {
   return new Response("not found", { status: 404 });
 });
 
-console.log("Cloudflare Worker is running...");
-
 export default app;
