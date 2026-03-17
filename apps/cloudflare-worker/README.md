@@ -10,6 +10,10 @@ Then, the secret:
 npx wrangler secret put WHATSAPP_APP_SECRET --cwd apps/cloudflare-worker
 ```
 
+Navigate to business.facebook.com, select your business, its settings, system users. Create a user if one doesn't exist and generate a token with `whatsapp_business_messaging`.
+
+Also, don't forget to assign assets to the app - specifically the whatsapp test account.
+
 Then, add the WhatsApp Cloud API access token:
 ```sh
 npx wrangler secret put WHATSAPP_ACCESS_TOKEN --cwd apps/cloudflare-worker
