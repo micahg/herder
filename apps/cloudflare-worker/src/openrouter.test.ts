@@ -86,6 +86,16 @@ describe("generateReplyFromOpenRouter", () => {
     );
   });
 
+  it("throws a clear error when fetch throws before response", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("network down");
+    }) as typeof fetch;
+
+    await expect(generateReplyFromOpenRouter(env(), "hello")).rejects.toThrow(
+      "OpenRouter request threw before response: network down"
+    );
+  });
+
   it("throws when response has no usable content", async () => {
     globalThis.fetch = vi.fn(async () => {
       return new Response(

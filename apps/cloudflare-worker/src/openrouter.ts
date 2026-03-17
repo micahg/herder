@@ -24,29 +24,40 @@ export async function generateReplyFromOpenRouter(
   const model = env.OPENROUTER_MODEL || DEFAULT_MODEL;
   const systemPrompt = env.OPENROUTER_SYSTEM_PROMPT || DEFAULT_SYSTEM_PROMPT;
 
-  const response = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": env.OPENROUTER_SITE_URL || "https://herder.local",
-      "X-OpenRouter-Title": env.OPENROUTER_APP_TITLE || "Herder",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": env.OPENROUTER_SITE_URL || "https://herder.local",
+        "X-OpenRouter-Title": env.OPENROUTER_APP_TITLE || "Herder",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+      }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`OpenRouter request threw before response: ${message}`);
+  }
 
   if (!response.ok) {
     const details = await response.text();
     throw new Error(`OpenRouter request failed (${response.status}): ${details}`);
   }
 
-  const data = (await response.json()) as OpenRouterResponse;
+  let data: OpenRouterResponse;
+  try {
+    data = (await response.json()) as OpenRouterResponse;
+  } catch {
+    throw new Error("OpenRouter returned a non-JSON response body");
+  }
   const content = data.choices?.[0]?.message?.content;
 
   if (typeof content === "string" && content.trim().length > 0) {
