@@ -5,6 +5,12 @@ import { handleWebhookEvent, handleWebhookVerification } from "./webhooks";
 export interface Env {
   WHATSAPP_VERIFY_TOKEN: string;
   WHATSAPP_APP_SECRET: string;
+  WHATSAPP_ACCESS_TOKEN: string;
+  OPENROUTER_API_KEY: string;
+  OPENROUTER_MODEL?: string;
+  OPENROUTER_SYSTEM_PROMPT?: string;
+  OPENROUTER_SITE_URL?: string;
+  OPENROUTER_APP_TITLE?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
