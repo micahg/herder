@@ -39,7 +39,7 @@ export interface OpenRouterToolContext {
 
 const LIST_WHATSAPP_GROUP_CHATS_TOOL = "list_whatsapp_group_chats";
 const LIST_WHATSAPP_GROUP_CHATS_DESCRIPTION =
-  "List the whatsapp group chats this user belongs to";
+  "List the name and ID of each whatsapp group chats this user belongs to";
 
 export async function generateReplyFromOpenRouter(
   env: Env,
