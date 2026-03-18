@@ -187,14 +187,38 @@ describe("POST /webhooks", () => {
 
     globalThis.fetch = fetchMock as typeof fetch;
     try {
-      const res = await postSignedWebhook(textMessageBody("hello from user"));
+      const res = await postSignedWebhook(textMessageBody("@herder hello from user"));
       expect(res.status).toBe(200);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it("handles non-text messages with fixed fallback reply", async () => {
+  it("ignores text messages that do not start with @herder", async () => {
+    const fetchMock = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("openrouter.ai/api/v1/chat/completions")) {
+        throw new Error("OpenRouter should not be called for non-mentioned messages");
+      }
+
+      if (url.includes("graph.facebook.com/v23.0/1063260676863328/messages")) {
+        throw new Error("WhatsApp send should not run for non-mentioned messages");
+      }
+
+      return originalFetch(input, init);
+    };
+
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const res = await postSignedWebhook(textMessageBody("hello without mention"));
+      expect(res.status).toBe(200);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("ignores non-text messages", async () => {
     const fetchMock = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
 
@@ -203,12 +227,7 @@ describe("POST /webhooks", () => {
       }
 
       if (url.includes("graph.facebook.com/v23.0/1063260676863328/messages")) {
-        const payload = JSON.parse(String(init?.body));
-        expect(payload.text.body).toContain("only handle text messages");
-        return new Response(JSON.stringify({ messages: [{ id: "wamid.outbound" }] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        throw new Error("WhatsApp send should not run for non-text messages");
       }
 
       return originalFetch(input, init);
@@ -240,7 +259,7 @@ describe("POST /webhooks", () => {
 
     globalThis.fetch = fetchMock as typeof fetch;
     try {
-      const res = await postSignedWebhook(textMessageBody("will fail"));
+      const res = await postSignedWebhook(textMessageBody("@herder will fail"));
       expect(res.status).toBe(500);
     } finally {
       globalThis.fetch = originalFetch;
@@ -267,7 +286,7 @@ describe("POST /webhooks", () => {
 
     globalThis.fetch = fetchMock as typeof fetch;
     try {
-      const res = await postSignedWebhook(textMessageBody("hello"));
+      const res = await postSignedWebhook(textMessageBody("@herder hello"));
       expect(res.status).toBe(500);
     } finally {
       globalThis.fetch = originalFetch;
