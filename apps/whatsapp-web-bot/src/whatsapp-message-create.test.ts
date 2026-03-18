@@ -109,7 +109,10 @@ describe("createWhatsAppRuntime message_create", () => {
     expect(mockState.generateReplyFromOpenRouter).toHaveBeenCalledTimes(1);
     expect(mockState.generateReplyFromOpenRouter).toHaveBeenCalledWith(
       expect.any(Object),
-      "tell whats the score"
+      "tell whats the score",
+      expect.objectContaining({
+        listWhatsAppGroupChats: expect.any(Function),
+      })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");
   });
@@ -241,7 +244,10 @@ describe("createWhatsAppRuntime message_create", () => {
     expect(mockState.generateReplyFromOpenRouter).toHaveBeenCalledTimes(1);
     expect(mockState.generateReplyFromOpenRouter).toHaveBeenCalledWith(
       expect.any(Object),
-      "test"
+      "test",
+      expect.objectContaining({
+        listWhatsAppGroupChats: expect.any(Function),
+      })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");
   });

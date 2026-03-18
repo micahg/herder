@@ -140,6 +140,14 @@ Session/auth files are stored under `apps/whatsapp-web-bot/.wwebjs_auth/` by `Lo
 - Only responds when text starts with command prefix (default: `!herder`)
 - Prompt sent to OpenRouter is the text after the prefix
 
+### Built-in Tooling
+
+The OpenRouter request includes a built-in no-argument tool:
+
+- `list_whatsapp_group_chats`: "List the whatsapp group chats this user belongs to"
+
+When the model chooses that tool, the bot returns group chat summaries in `{ id, name }` format from the authenticated WhatsApp account.
+
 ## Troubleshooting
 
 ### `Error: ... LocalAuth export` / module export errors
@@ -167,3 +175,18 @@ App can still start. Reply generation will fail when an incoming message actuall
 npm run check --workspace @herder/whatsapp-web-bot
 npm run test --workspace @herder/whatsapp-web-bot
 ```
+
+## List Group Chats (Test Script)
+
+You can run a one-off script that logs all WhatsApp group chats visible to the authenticated account.
+
+From repo root:
+
+```sh
+npm run list-groups --workspace @herder/whatsapp-web-bot
+```
+
+Notes:
+- The script reuses `LocalAuth` via `WA_WEB_CLIENT_ID` (same auth session behavior as the bot runtime).
+- On first run (or when auth expires), it prints a QR in terminal for pairing.
+- Output format is one line per group with name and WhatsApp chat id.

@@ -14,6 +14,12 @@ export interface WhatsAppRuntime {
   shutdown(): Promise<void>;
   getLatestQr(): string | null;
   isReady(): boolean;
+  listGroupChats(): Promise<WhatsAppGroupChatSummary[]>;
+}
+
+export interface WhatsAppGroupChatSummary {
+  id: string;
+  name: string;
 }
 
 export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
@@ -31,6 +37,18 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
       executablePath,
     },
   });
+
+  const listGroupChatsForRuntime = async (): Promise<WhatsAppGroupChatSummary[]> => {
+    if (!initialized || shutdownStarted) {
+      throw new Error("WhatsApp runtime is not initialized");
+    }
+
+    if (!ready) {
+      throw new Error("WhatsApp runtime is not ready");
+    }
+
+    return listGroupChats(client);
+  };
 
   client.on("qr", (qr) => {
     latestQr = qr;
@@ -66,7 +84,7 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
     }
 
     try {
-      await maybeReply(env, message);
+      await maybeReply(env, message, listGroupChatsForRuntime);
     } catch (error) {
       console.error("Failed to handle incoming WhatsApp message", error);
     }
@@ -80,7 +98,7 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
 
     console.log(`Received eligible outgoing WhatsApp command: ${message.body}`);
     try {
-      await maybeReply(env, message);
+      await maybeReply(env, message, listGroupChatsForRuntime);
     } catch (error) {
       console.error("Failed to handle outgoing self WhatsApp message", error);
     }
@@ -134,6 +152,7 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
     isReady() {
       return ready;
     },
+    listGroupChats: listGroupChatsForRuntime,
   };
 }
 
@@ -180,7 +199,11 @@ function resolveBrowserExecutablePath(): string | undefined {
   return undefined;
 }
 
-async function maybeReply(env: Env, message: Message): Promise<void> {
+async function maybeReply(
+  env: Env,
+  message: Message,
+  listWhatsAppGroupChats: () => Promise<WhatsAppGroupChatSummary[]>
+): Promise<void> {
   if (message.type !== "chat") {
     return;
   }
@@ -204,8 +227,22 @@ async function maybeReply(env: Env, message: Message): Promise<void> {
     return;
   }
 
-  const reply = await generateReplyFromOpenRouter(env, prompt);
+  const reply = await generateReplyFromOpenRouter(env, prompt, {
+    listWhatsAppGroupChats,
+  });
   await message.reply(reply);
+}
+
+async function listGroupChats(
+  client: InstanceType<typeof Client>
+): Promise<WhatsAppGroupChatSummary[]> {
+  const chats = await client.getChats();
+  return chats
+    .filter((chat) => chat.isGroup || chat.id?.server === "g.us")
+    .map((chat) => ({
+      id: chat.id?._serialized || "unknown",
+      name: chat.name || "(unnamed group)",
+    }));
 }
 
 function isEligibleOutgoingCommandMessage(message: Message): boolean {
