@@ -5,8 +5,7 @@ import { parseFirstIncomingMessage } from "./whatsapp-webhook";
 import { sendWhatsAppText } from "./whatsapp-send";
 
 type WebhookContext = Context<{ Bindings: Env }>;
-const NON_TEXT_FALLBACK_MESSAGE =
-  "I can only handle text messages right now. Please send your question as text.";
+const BOT_MENTION_PREFIX = "@herder";
 
 export function handleWebhookVerification(context: WebhookContext) {
   console.log("Received webhook verification request");
@@ -44,14 +43,13 @@ export async function handleWebhookEvent(context: WebhookContext) {
     return context.body(null, 200);
   }
 
+  const prompt = extractMentionedPrompt(incomingMessage);
+  if (prompt === null) {
+    return context.body(null, 200);
+  }
+
   try {
-    const outboundBody =
-      incomingMessage.type === "text"
-        ? await generateReplyFromOpenRouter(
-            context.env,
-            incomingMessage.textBody || ""
-          )
-        : NON_TEXT_FALLBACK_MESSAGE;
+    const outboundBody = await generateReplyFromOpenRouter(context.env, prompt);
 
     const outboundMessageId = await sendWhatsAppText(context.env, {
       phoneNumberId: incomingMessage.phoneNumberId,
@@ -64,6 +62,22 @@ export async function handleWebhookEvent(context: WebhookContext) {
   }
 
   return context.body(null, 200);
+}
+
+function extractMentionedPrompt(
+  incomingMessage: ReturnType<typeof parseFirstIncomingMessage>
+): string | null {
+  if (!incomingMessage || incomingMessage.type !== "text") {
+    return null;
+  }
+
+  const text = incomingMessage.textBody?.trim() || "";
+  const lower = text.toLowerCase();
+  if (!lower.startsWith(BOT_MENTION_PREFIX)) {
+    return null;
+  }
+
+  return text.slice(BOT_MENTION_PREFIX.length).trim();
 }
 
 async function validateAndReadRawBody(
