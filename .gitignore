@@ -3,3 +3,5 @@ node_modules
 dist
 .env
 coverage
+apps/whatsapp-web-bot/.wwebjs_auth
+apps/whatsapp-web-bot/.wwebjs_cache
