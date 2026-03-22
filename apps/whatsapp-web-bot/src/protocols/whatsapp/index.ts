@@ -2,4 +2,5 @@ export {
   createWhatsAppRuntime,
   type WhatsAppRuntime,
   type WhatsAppGroupChatSummary,
-} from "./protocols/whatsapp/runtime";
+} from "./runtime";
+export { registerWhatsAppSetupRoutes } from "./routes";

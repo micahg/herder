@@ -2,10 +2,11 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { createServer } from "node:net";
 import { loadEnv } from "./env";
-import { createWhatsAppRuntime } from "./whatsapp";
+import { getProtocolAdapter } from "./protocols";
 
 const env = loadEnv();
-const runtime = createWhatsAppRuntime(env);
+const protocolAdapter = getProtocolAdapter(env.CHAT_PROTOCOL);
+const runtime = protocolAdapter.createRuntime(env);
 const app = new Hono();
 let shutdownPromise: Promise<void> | null = null;
 
@@ -15,26 +16,17 @@ runtime.initialize().catch(async (error) => {
 });
 
 app.get("/health", (c) => {
+  const health = protocolAdapter.getHealth(runtime);
   return c.json({
     ok: true,
-    ready: runtime.isReady(),
-    hasQr: Boolean(runtime.getLatestQr()),
+    protocol: protocolAdapter.name,
+    ready: health.ready,
+    hasSetupCode: health.hasSetupCode,
+    hasQr: health.hasSetupCode,
   });
 });
 
-app.get("/setup/qr", (c) => {
-  const authHeader = c.req.header("Authorization") || "";
-  const expected = `Bearer ${env.WA_WEB_ADMIN_SETUP_TOKEN}`;
-
-  if (authHeader !== expected) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
-
-  return c.json({
-    ready: runtime.isReady(),
-    qr: runtime.getLatestQr(),
-  });
-});
+protocolAdapter.registerSetupRoutes(app, env, runtime);
 
 const listenPort = await resolveAvailablePort(env.PORT);
 

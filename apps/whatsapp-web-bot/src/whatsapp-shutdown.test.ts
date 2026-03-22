@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "./env";
-import { createWhatsAppRuntime } from "./whatsapp";
+import { createWhatsAppRuntime } from "./protocols/whatsapp/runtime";
 
 const mockState = vi.hoisted(() => {
   return {
@@ -8,6 +8,9 @@ const mockState = vi.hoisted(() => {
     destroy: vi.fn(async () => {}),
     removeAllListeners: vi.fn(),
     on: vi.fn(),
+    getChats: vi.fn<() => Promise<Array<Record<string, unknown>>>>(
+      async () => []
+    ),
   };
 });
 
@@ -21,6 +24,7 @@ vi.mock("whatsapp-web.js", () => {
     initialize = mockState.initialize;
     destroy = mockState.destroy;
     removeAllListeners = mockState.removeAllListeners;
+    getChats = mockState.getChats;
 
     constructor(_options: unknown) {}
   }
@@ -44,6 +48,7 @@ vi.mock("qrcode-terminal", () => {
 function env(overrides: Partial<Env> = {}): Env {
   return {
     PORT: 3000,
+    CHAT_PROTOCOL: "whatsapp",
     WA_WEB_ADMIN_SETUP_TOKEN: "setup-token",
     WA_WEB_CLIENT_ID: "herder",
     BOT_MENTION_PREFIX: "!herder",
@@ -62,6 +67,7 @@ afterEach(() => {
   mockState.destroy.mockClear();
   mockState.removeAllListeners.mockClear();
   mockState.on.mockClear();
+  mockState.getChats.mockClear();
 });
 
 describe("createWhatsAppRuntime shutdown", () => {
@@ -82,5 +88,65 @@ describe("createWhatsAppRuntime shutdown", () => {
     await runtime.initialize();
 
     expect(mockState.initialize).not.toHaveBeenCalled();
+  });
+
+  it("listGroupChats throws when runtime is not initialized", async () => {
+    const runtime = createWhatsAppRuntime(env());
+
+    await expect(runtime.listGroupChats()).rejects.toThrow(
+      "WhatsApp runtime is not initialized"
+    );
+  });
+
+  it("listGroupChats throws when runtime is not ready", async () => {
+    const runtime = createWhatsAppRuntime(env());
+
+    await runtime.initialize();
+
+    await expect(runtime.listGroupChats()).rejects.toThrow(
+      "WhatsApp runtime is not ready"
+    );
+  });
+
+  it("listGroupChats returns id/name mapped group chats", async () => {
+    mockState.getChats.mockResolvedValue([
+      {
+        isGroup: true,
+        id: { _serialized: "123@g.us", server: "g.us" },
+        name: "Family",
+      },
+      {
+        isGroup: false,
+        id: { _serialized: "555@g.us", server: "g.us" },
+        name: "Friends",
+      },
+      {
+        isGroup: false,
+        id: { _serialized: "111@c.us", server: "c.us" },
+        name: "Direct Chat",
+      },
+      {
+        isGroup: true,
+        id: undefined,
+        name: "",
+      },
+    ]);
+
+    const runtime = createWhatsAppRuntime(env());
+    await runtime.initialize();
+
+    const readyRegistration = mockState.on.mock.calls.find(
+      ([event]) => event === "ready"
+    );
+    const onReady = readyRegistration?.[1] as (() => void) | undefined;
+    onReady?.();
+
+    const groups = await runtime.listGroupChats();
+
+    expect(groups).toEqual([
+      { id: "123@g.us", name: "Family" },
+      { id: "555@g.us", name: "Friends" },
+      { id: "unknown", name: "(unnamed group)" },
+    ]);
   });
 });
