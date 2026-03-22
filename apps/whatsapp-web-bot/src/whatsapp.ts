@@ -229,6 +229,7 @@ async function maybeReply(
 
   const reply = await generateReplyFromOpenRouter(env, prompt, {
     listWhatsAppGroupChats,
+    getCurrentWhatsAppGroupChat: () => getCurrentWhatsAppGroupChat(message),
   });
   await message.reply(reply);
 }
@@ -298,4 +299,42 @@ function isLidJid(jid: string): boolean {
 
 function isGroupJid(jid: string): boolean {
   return jid.endsWith("@g.us");
+}
+
+async function getCurrentWhatsAppGroupChat(
+  message: Message
+): Promise<WhatsAppGroupChatSummary | null> {
+  const groupJid = extractGroupJidFromMessage(message);
+  if (!groupJid) {
+    return null;
+  }
+
+  try {
+    const chat = await message.getChat();
+    if (chat && (chat.isGroup || chat.id?.server === "g.us")) {
+      return {
+        id: chat.id?._serialized || groupJid,
+        name: chat.name || "(unnamed group)",
+      };
+    }
+  } catch {
+    // Fall back to JID-only data if chat lookup is unavailable.
+  }
+
+  return {
+    id: groupJid,
+    name: "(unknown group)",
+  };
+}
+
+function extractGroupJidFromMessage(message: Message): string | null {
+  if (isGroupJid(message.from || "")) {
+    return message.from;
+  }
+
+  if (isGroupJid(message.to || "")) {
+    return message.to;
+  }
+
+  return null;
 }

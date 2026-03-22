@@ -35,11 +35,15 @@ interface OpenRouterMessage {
 
 export interface OpenRouterToolContext {
   listWhatsAppGroupChats?: () => Promise<WhatsAppGroupChatSummary[]>;
+  getCurrentWhatsAppGroupChat?: () => Promise<WhatsAppGroupChatSummary | null>;
 }
 
 const LIST_WHATSAPP_GROUP_CHATS_TOOL = "list_whatsapp_group_chats";
 const LIST_WHATSAPP_GROUP_CHATS_DESCRIPTION =
   "List the name and ID of each whatsapp group chats this user belongs to";
+const GET_CURRENT_WHATSAPP_GROUP_CHAT_TOOL = "get_current_whatsapp_group_chat";
+const GET_CURRENT_WHATSAPP_GROUP_CHAT_DESCRIPTION =
+  "Get the name and ID of the whatsapp group chat for the current message";
 
 export async function generateReplyFromOpenRouter(
   env: Env,
@@ -130,6 +134,21 @@ function buildTools(toolContext: OpenRouterToolContext): Array<{
     });
   }
 
+  if (toolContext.getCurrentWhatsAppGroupChat) {
+    tools.push({
+      type: "function",
+      function: {
+        name: GET_CURRENT_WHATSAPP_GROUP_CHAT_TOOL,
+        description: GET_CURRENT_WHATSAPP_GROUP_CHAT_DESCRIPTION,
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -153,6 +172,20 @@ async function executeToolCalls(
         tool_call_id: toolCallId,
         name: toolName,
         content: JSON.stringify(groups),
+      });
+      continue;
+    }
+
+    if (
+      toolName === GET_CURRENT_WHATSAPP_GROUP_CHAT_TOOL &&
+      toolContext.getCurrentWhatsAppGroupChat
+    ) {
+      const group = await toolContext.getCurrentWhatsAppGroupChat();
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCallId,
+        name: toolName,
+        content: JSON.stringify(group),
       });
       continue;
     }

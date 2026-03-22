@@ -149,6 +149,7 @@ describe("createWhatsAppRuntime message_create", () => {
       "tell whats the score",
       expect.objectContaining({
         listWhatsAppGroupChats: expect.any(Function),
+        getCurrentWhatsAppGroupChat: expect.any(Function),
       })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");
@@ -284,6 +285,7 @@ describe("createWhatsAppRuntime message_create", () => {
       "test",
       expect.objectContaining({
         listWhatsAppGroupChats: expect.any(Function),
+        getCurrentWhatsAppGroupChat: expect.any(Function),
       })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");

@@ -100,7 +100,7 @@ describe("generateReplyFromOpenRouter", () => {
     const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(firstBody.tools?.[0]?.function?.name).toBe("list_whatsapp_group_chats");
     expect(firstBody.tools?.[0]?.function?.description).toBe(
-      "List the whatsapp group chats this user belongs to"
+      "List the name and ID of each whatsapp group chats this user belongs to"
     );
     expect(firstBody.tools?.[0]?.function?.parameters).toEqual({
       type: "object",
@@ -121,5 +121,76 @@ describe("generateReplyFromOpenRouter", () => {
         { id: "2@g.us", name: "Friends" },
       ])
     );
+  });
+
+  it("executes current message group chat tool and returns final assistant text", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      id: "call_2",
+                      type: "function",
+                      function: {
+                        name: "get_current_whatsapp_group_chat",
+                        arguments: "{}",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "This message came from Family." } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+    const getCurrentWhatsAppGroupChat = vi.fn(async () => ({
+      id: "1@g.us",
+      name: "Family",
+    }));
+
+    const reply = await generateReplyFromOpenRouter(env(), "what group is this", {
+      getCurrentWhatsAppGroupChat,
+    });
+
+    expect(reply).toBe("This message came from Family.");
+    expect(getCurrentWhatsAppGroupChat).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(firstBody.tools?.[0]?.function?.name).toBe("get_current_whatsapp_group_chat");
+    expect(firstBody.tools?.[0]?.function?.description).toBe(
+      "Get the name and ID of the whatsapp group chat for the current message"
+    );
+    expect(firstBody.tools?.[0]?.function?.parameters).toEqual({
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    });
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    const toolMessage = secondBody.messages.find(
+      (message: { role?: string }) => message.role === "tool"
+    );
+    expect(toolMessage).toBeDefined();
+    expect(toolMessage.name).toBe("get_current_whatsapp_group_chat");
+    expect(toolMessage.tool_call_id).toBe("call_2");
+    expect(toolMessage.content).toBe(JSON.stringify({ id: "1@g.us", name: "Family" }));
   });
 });
