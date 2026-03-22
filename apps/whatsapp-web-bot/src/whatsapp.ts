@@ -79,14 +79,10 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
 
   client.on("message", async (message: Message) => {
     console.log(`Received WhatsApp message from ${message.from}: ${message.body}`);
-    if (message.fromMe) {
+    // Commands are owner-only and are handled exclusively via `message_create`.
+    // Drop all inbound chat messages from other participants.
+    if (!message.fromMe) {
       return;
-    }
-
-    try {
-      await maybeReply(env, message, listGroupChatsForRuntime);
-    } catch (error) {
-      console.error("Failed to handle incoming WhatsApp message", error);
     }
   });
 
@@ -204,11 +200,15 @@ async function maybeReply(
   message: Message,
   listWhatsAppGroupChats: () => Promise<WhatsAppGroupChatSummary[]>
 ): Promise<void> {
+  if (!message.fromMe) {
+    return;
+  }
+
   if (message.type !== "chat") {
     return;
   }
 
-  if (message.fromMe && !isEligibleOutgoingCommandMessage(message)) {
+  if (!isEligibleOutgoingCommandMessage(message)) {
     return;
   }
 

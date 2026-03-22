@@ -73,6 +73,43 @@ afterEach(() => {
 });
 
 describe("createWhatsAppRuntime message_create", () => {
+  it("drops inbound non-owner command messages", async () => {
+    createWhatsAppRuntime(env());
+
+    const messageRegistration = mockState.on.mock.calls.find(
+      ([event]) => event === "message"
+    );
+
+    expect(messageRegistration).toBeDefined();
+
+    const onMessage = messageRegistration?.[1] as
+      | ((message: {
+          fromMe: boolean;
+          from: string;
+          to: string;
+          type: string;
+          body: string;
+          reply: (text: string) => Promise<void>;
+        }) => Promise<void>)
+      | undefined;
+
+    expect(onMessage).toBeDefined();
+
+    const reply = vi.fn(async () => {});
+
+    await onMessage?.({
+      fromMe: false,
+      from: "15550001111@c.us",
+      to: "15551234567@c.us",
+      type: "chat",
+      body: "!herder tell me a secret",
+      reply,
+    });
+
+    expect(mockState.generateReplyFromOpenRouter).not.toHaveBeenCalled();
+    expect(reply).not.toHaveBeenCalled();
+  });
+
   it("replies to self-directed mention messages", async () => {
     createWhatsAppRuntime(env());
 
