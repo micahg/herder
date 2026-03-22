@@ -1,10 +1,15 @@
 import type { Env } from "./env";
-import type { WhatsAppGroupChatSummary } from "./whatsapp";
+import type {
+  ChatMemberLookupInput,
+  OpenRouterProtocolToolDescriptions,
+  OpenRouterProtocolToolNames,
+  ProtocolToolContext,
+} from "./protocols/types";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "openrouter/auto";
 const DEFAULT_SYSTEM_PROMPT =
-  "You are a concise, friendly assistant replying to WhatsApp users. Keep answers practical and brief unless they ask for detail.";
+  "You are a concise, friendly assistant replying to chat users. Keep answers practical and brief unless they ask for detail.";
 
 interface OpenRouterResponse {
   choices?: Array<{
@@ -33,17 +38,36 @@ interface OpenRouterMessage {
   name?: string;
 }
 
-export interface OpenRouterToolContext {
-  listWhatsAppGroupChats?: () => Promise<WhatsAppGroupChatSummary[]>;
-  getCurrentWhatsAppGroupChat?: () => Promise<WhatsAppGroupChatSummary | null>;
-}
+export interface OpenRouterToolContext extends ProtocolToolContext {}
 
-const LIST_WHATSAPP_GROUP_CHATS_TOOL = "list_whatsapp_group_chats";
-const LIST_WHATSAPP_GROUP_CHATS_DESCRIPTION =
-  "List the name and ID of each whatsapp group chats this user belongs to";
-const GET_CURRENT_WHATSAPP_GROUP_CHAT_TOOL = "get_current_whatsapp_group_chat";
-const GET_CURRENT_WHATSAPP_GROUP_CHAT_DESCRIPTION =
-  "Get the name and ID of the whatsapp group chat for the current message";
+const DEFAULT_TOOL_NAMES: OpenRouterProtocolToolNames = {
+  listChannels: "list_channels",
+  getCurrentChannel: "get_current_channel",
+  listChatMembers: "list_chat_members",
+};
+
+const DEFAULT_TOOL_DESCRIPTIONS: OpenRouterProtocolToolDescriptions = {
+  listChannels: "List the channels available to this bot account",
+  getCurrentChannel: "Get details about the current channel for this message",
+  listChatMembers:
+    "List name and ID for chat members. Provide chatId and/or chatName to target a specific chat; omit both for current chat.",
+};
+
+type JsonSchemaObject = {
+  type: "object";
+  properties: Record<string, unknown>;
+  required?: string[];
+  additionalProperties: boolean;
+};
+
+type OpenRouterToolDefinition = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: JsonSchemaObject;
+  };
+};
 
 export async function generateReplyFromOpenRouter(
   env: Env,
@@ -94,37 +118,17 @@ export async function generateReplyFromOpenRouter(
   return extractAssistantText(secondPassData);
 }
 
-function buildTools(toolContext: OpenRouterToolContext): Array<{
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: {
-      type: "object";
-      properties: Record<string, never>;
-      additionalProperties: boolean;
-    };
-  };
-}> {
-  const tools: Array<{
-    type: "function";
-    function: {
-      name: string;
-      description: string;
-      parameters: {
-        type: "object";
-        properties: Record<string, never>;
-        additionalProperties: boolean;
-      };
-    };
-  }> = [];
+function buildTools(toolContext: OpenRouterToolContext): OpenRouterToolDefinition[] {
+  const toolNames = resolveToolNames(toolContext);
+  const toolDescriptions = resolveToolDescriptions(toolContext);
+  const tools: OpenRouterToolDefinition[] = [];
 
-  if (toolContext.listWhatsAppGroupChats) {
+  if (toolContext.listChannels) {
     tools.push({
       type: "function",
       function: {
-        name: LIST_WHATSAPP_GROUP_CHATS_TOOL,
-        description: LIST_WHATSAPP_GROUP_CHATS_DESCRIPTION,
+        name: toolNames.listChannels,
+        description: toolDescriptions.listChannels,
         parameters: {
           type: "object",
           properties: {},
@@ -134,15 +138,39 @@ function buildTools(toolContext: OpenRouterToolContext): Array<{
     });
   }
 
-  if (toolContext.getCurrentWhatsAppGroupChat) {
+  if (toolContext.getCurrentChannel) {
     tools.push({
       type: "function",
       function: {
-        name: GET_CURRENT_WHATSAPP_GROUP_CHAT_TOOL,
-        description: GET_CURRENT_WHATSAPP_GROUP_CHAT_DESCRIPTION,
+        name: toolNames.getCurrentChannel,
+        description: toolDescriptions.getCurrentChannel,
         parameters: {
           type: "object",
           properties: {},
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
+  if (toolContext.listChatMembers) {
+    tools.push({
+      type: "function",
+      function: {
+        name: toolNames.listChatMembers,
+        description: toolDescriptions.listChatMembers,
+        parameters: {
+          type: "object",
+          properties: {
+            chatId: {
+              type: "string",
+              description: "Target chat ID, such as a WhatsApp JID like 1234567890@g.us",
+            },
+            chatName: {
+              type: "string",
+              description: "Human-readable target chat name, such as Family",
+            },
+          },
           additionalProperties: false,
         },
       },
@@ -156,17 +184,15 @@ async function executeToolCalls(
   toolCalls: OpenRouterToolCall[],
   toolContext: OpenRouterToolContext
 ): Promise<OpenRouterMessage[]> {
+  const toolNames = resolveToolNames(toolContext);
   const messages: OpenRouterMessage[] = [];
 
   for (const toolCall of toolCalls) {
     const toolCallId = toolCall.id || "missing-tool-call-id";
     const toolName = toolCall.function?.name || "unknown";
 
-    if (
-      toolName === LIST_WHATSAPP_GROUP_CHATS_TOOL &&
-      toolContext.listWhatsAppGroupChats
-    ) {
-      const groups = await toolContext.listWhatsAppGroupChats();
+    if (toolName === toolNames.listChannels && toolContext.listChannels) {
+      const groups = await toolContext.listChannels();
       messages.push({
         role: "tool",
         tool_call_id: toolCallId,
@@ -176,16 +202,26 @@ async function executeToolCalls(
       continue;
     }
 
-    if (
-      toolName === GET_CURRENT_WHATSAPP_GROUP_CHAT_TOOL &&
-      toolContext.getCurrentWhatsAppGroupChat
-    ) {
-      const group = await toolContext.getCurrentWhatsAppGroupChat();
+    if (toolName === toolNames.getCurrentChannel && toolContext.getCurrentChannel) {
+      const group = await toolContext.getCurrentChannel();
       messages.push({
         role: "tool",
         tool_call_id: toolCallId,
         name: toolName,
         content: JSON.stringify(group),
+      });
+      continue;
+    }
+
+    if (toolName === toolNames.listChatMembers && toolContext.listChatMembers) {
+      const members = await toolContext.listChatMembers(
+        parseChatMemberLookupInput(toolCall.function?.arguments)
+      );
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCallId,
+        name: toolName,
+        content: JSON.stringify(members),
       });
       continue;
     }
@@ -199,6 +235,56 @@ async function executeToolCalls(
   }
 
   return messages;
+}
+
+function parseChatMemberLookupInput(rawArgs: string | undefined): ChatMemberLookupInput {
+  if (!rawArgs) {
+    return {};
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawArgs);
+  } catch {
+    return {};
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return {};
+  }
+
+  const chatId = normalizeOptionalString((parsed as { chatId?: unknown }).chatId);
+  const chatName = normalizeOptionalString((parsed as { chatName?: unknown }).chatName);
+
+  return {
+    ...(chatId ? { chatId } : {}),
+    ...(chatName ? { chatName } : {}),
+  };
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveToolNames(toolContext: OpenRouterToolContext): OpenRouterProtocolToolNames {
+  return {
+    ...DEFAULT_TOOL_NAMES,
+    ...(toolContext.toolNames || {}),
+  };
+}
+
+function resolveToolDescriptions(
+  toolContext: OpenRouterToolContext
+): OpenRouterProtocolToolDescriptions {
+  return {
+    ...DEFAULT_TOOL_DESCRIPTIONS,
+    ...(toolContext.toolDescriptions || {}),
+  };
 }
 
 function normalizeAssistantContent(
@@ -228,11 +314,7 @@ async function requestOpenRouterCompletion(
       function: {
         name: string;
         description: string;
-        parameters: {
-          type: "object";
-          properties: Record<string, never>;
-          additionalProperties: boolean;
-        };
+        parameters: JsonSchemaObject;
       };
     }>;
   }

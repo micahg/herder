@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "./env";
-import { createWhatsAppRuntime } from "./whatsapp";
+import { createWhatsAppRuntime } from "./protocols/whatsapp/runtime";
 
 const mockState = vi.hoisted(() => {
   return {
@@ -48,6 +48,7 @@ vi.mock("qrcode-terminal", () => {
 function env(overrides: Partial<Env> = {}): Env {
   return {
     PORT: 3000,
+    CHAT_PROTOCOL: "whatsapp",
     WA_WEB_ADMIN_SETUP_TOKEN: "setup-token",
     WA_WEB_CLIENT_ID: "herder",
     BOT_MENTION_PREFIX: "!herder",

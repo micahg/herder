@@ -7,6 +7,7 @@ const originalFetch = globalThis.fetch;
 function env(overrides: Partial<Env> = {}): Env {
   return {
     PORT: 3000,
+    CHAT_PROTOCOL: "whatsapp",
     WA_WEB_ADMIN_SETUP_TOKEN: "setup-token",
     WA_WEB_CLIENT_ID: "herder",
     BOT_MENTION_PREFIX: "!herder",
@@ -47,7 +48,7 @@ describe("generateReplyFromOpenRouter", () => {
     );
   });
 
-  it("executes no-arg list group chats tool and returns final assistant text", async () => {
+  it("executes no-arg list channels tool and returns final assistant text", async () => {
     const fetchMock = vi
       .fn()
       .mockImplementationOnce(async () => {
@@ -62,7 +63,7 @@ describe("generateReplyFromOpenRouter", () => {
                       id: "call_1",
                       type: "function",
                       function: {
-                        name: "list_whatsapp_group_chats",
+                        name: "list_channels",
                         arguments: "{}",
                       },
                     },
@@ -84,23 +85,23 @@ describe("generateReplyFromOpenRouter", () => {
       });
 
     globalThis.fetch = fetchMock as typeof fetch;
-    const listWhatsAppGroupChats = vi.fn(async () => [
+    const listChannels = vi.fn(async () => [
       { id: "1@g.us", name: "Family" },
       { id: "2@g.us", name: "Friends" },
     ]);
 
     const reply = await generateReplyFromOpenRouter(env(), "what groups am i in", {
-      listWhatsAppGroupChats,
+      listChannels,
     });
 
     expect(reply).toBe("You are in 2 groups.");
-    expect(listWhatsAppGroupChats).toHaveBeenCalledTimes(1);
+    expect(listChannels).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    expect(firstBody.tools?.[0]?.function?.name).toBe("list_whatsapp_group_chats");
+    expect(firstBody.tools?.[0]?.function?.name).toBe("list_channels");
     expect(firstBody.tools?.[0]?.function?.description).toBe(
-      "List the name and ID of each whatsapp group chats this user belongs to"
+      "List the channels available to this bot account"
     );
     expect(firstBody.tools?.[0]?.function?.parameters).toEqual({
       type: "object",
@@ -113,7 +114,7 @@ describe("generateReplyFromOpenRouter", () => {
       (message: { role?: string }) => message.role === "tool"
     );
     expect(toolMessage).toBeDefined();
-    expect(toolMessage.name).toBe("list_whatsapp_group_chats");
+    expect(toolMessage.name).toBe("list_channels");
     expect(toolMessage.tool_call_id).toBe("call_1");
     expect(toolMessage.content).toBe(
       JSON.stringify([
@@ -123,7 +124,7 @@ describe("generateReplyFromOpenRouter", () => {
     );
   });
 
-  it("executes current message group chat tool and returns final assistant text", async () => {
+  it("executes current channel tool and returns final assistant text", async () => {
     const fetchMock = vi
       .fn()
       .mockImplementationOnce(async () => {
@@ -138,7 +139,7 @@ describe("generateReplyFromOpenRouter", () => {
                       id: "call_2",
                       type: "function",
                       function: {
-                        name: "get_current_whatsapp_group_chat",
+                        name: "get_current_channel",
                         arguments: "{}",
                       },
                     },
@@ -160,23 +161,23 @@ describe("generateReplyFromOpenRouter", () => {
       });
 
     globalThis.fetch = fetchMock as typeof fetch;
-    const getCurrentWhatsAppGroupChat = vi.fn(async () => ({
+    const getCurrentChannel = vi.fn(async () => ({
       id: "1@g.us",
       name: "Family",
     }));
 
     const reply = await generateReplyFromOpenRouter(env(), "what group is this", {
-      getCurrentWhatsAppGroupChat,
+      getCurrentChannel,
     });
 
     expect(reply).toBe("This message came from Family.");
-    expect(getCurrentWhatsAppGroupChat).toHaveBeenCalledTimes(1);
+    expect(getCurrentChannel).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    expect(firstBody.tools?.[0]?.function?.name).toBe("get_current_whatsapp_group_chat");
+    expect(firstBody.tools?.[0]?.function?.name).toBe("get_current_channel");
     expect(firstBody.tools?.[0]?.function?.description).toBe(
-      "Get the name and ID of the whatsapp group chat for the current message"
+      "Get details about the current channel for this message"
     );
     expect(firstBody.tools?.[0]?.function?.parameters).toEqual({
       type: "object",
@@ -189,8 +190,94 @@ describe("generateReplyFromOpenRouter", () => {
       (message: { role?: string }) => message.role === "tool"
     );
     expect(toolMessage).toBeDefined();
-    expect(toolMessage.name).toBe("get_current_whatsapp_group_chat");
+    expect(toolMessage.name).toBe("get_current_channel");
     expect(toolMessage.tool_call_id).toBe("call_2");
     expect(toolMessage.content).toBe(JSON.stringify({ id: "1@g.us", name: "Family" }));
+  });
+
+  it("executes chat members tool with target args and returns final assistant text", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      id: "call_3",
+                      type: "function",
+                      function: {
+                        name: "list_chat_members",
+                        arguments: JSON.stringify({ chatName: "Family" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "This chat has 2 members." } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+    const listChatMembers = vi.fn(async () => [
+      { id: "111@c.us", name: "Alice" },
+      { id: "222@c.us", name: "Bob" },
+    ]);
+
+    const reply = await generateReplyFromOpenRouter(env(), "who is in this chat", {
+      listChatMembers,
+    });
+
+    expect(reply).toBe("This chat has 2 members.");
+    expect(listChatMembers).toHaveBeenCalledTimes(1);
+    expect(listChatMembers).toHaveBeenCalledWith({ chatName: "Family" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(firstBody.tools?.[0]?.function?.name).toBe("list_chat_members");
+    expect(firstBody.tools?.[0]?.function?.description).toBe(
+      "List name and ID for chat members. Provide chatId and/or chatName to target a specific chat; omit both for current chat."
+    );
+    expect(firstBody.tools?.[0]?.function?.parameters).toEqual({
+      type: "object",
+      properties: {
+        chatId: {
+          type: "string",
+          description: "Target chat ID, such as a WhatsApp JID like 1234567890@g.us",
+        },
+        chatName: {
+          type: "string",
+          description: "Human-readable target chat name, such as Family",
+        },
+      },
+      additionalProperties: false,
+    });
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    const toolMessage = secondBody.messages.find(
+      (message: { role?: string }) => message.role === "tool"
+    );
+    expect(toolMessage).toBeDefined();
+    expect(toolMessage.name).toBe("list_chat_members");
+    expect(toolMessage.tool_call_id).toBe("call_3");
+    expect(toolMessage.content).toBe(
+      JSON.stringify([
+        { id: "111@c.us", name: "Alice" },
+        { id: "222@c.us", name: "Bob" },
+      ])
+    );
   });
 });

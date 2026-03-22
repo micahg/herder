@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "./env";
-import { createWhatsAppRuntime } from "./whatsapp";
+import { createWhatsAppRuntime } from "./protocols/whatsapp/runtime";
 
 const mockState = vi.hoisted(() => {
   return {
@@ -51,6 +51,7 @@ vi.mock("qrcode-terminal", () => {
 function env(overrides: Partial<Env> = {}): Env {
   return {
     PORT: 3000,
+    CHAT_PROTOCOL: "whatsapp",
     WA_WEB_ADMIN_SETUP_TOKEN: "setup-token",
     WA_WEB_CLIENT_ID: "herder",
     BOT_MENTION_PREFIX: "!herder",
@@ -148,8 +149,9 @@ describe("createWhatsAppRuntime message_create", () => {
       expect.any(Object),
       "tell whats the score",
       expect.objectContaining({
-        listWhatsAppGroupChats: expect.any(Function),
-        getCurrentWhatsAppGroupChat: expect.any(Function),
+        listChannels: expect.any(Function),
+        getCurrentChannel: expect.any(Function),
+        listChatMembers: expect.any(Function),
       })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");
@@ -284,8 +286,9 @@ describe("createWhatsAppRuntime message_create", () => {
       expect.any(Object),
       "test",
       expect.objectContaining({
-        listWhatsAppGroupChats: expect.any(Function),
-        getCurrentWhatsAppGroupChat: expect.any(Function),
+        listChannels: expect.any(Function),
+        getCurrentChannel: expect.any(Function),
+        listChatMembers: expect.any(Function),
       })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");

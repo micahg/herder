@@ -1,5 +1,6 @@
 export interface Env {
   PORT: number;
+  CHAT_PROTOCOL: string;
   WA_WEB_ADMIN_SETUP_TOKEN: string;
   WA_WEB_CLIENT_ID: string;
   BOT_MENTION_PREFIX: string;
@@ -44,6 +45,7 @@ export function loadEnv(): Env {
 
   return {
     PORT: port,
+    CHAT_PROTOCOL: process.env.CHAT_PROTOCOL?.trim().toLowerCase() || "whatsapp",
     WA_WEB_ADMIN_SETUP_TOKEN: resolveSetupToken(),
     WA_WEB_CLIENT_ID: process.env.WA_WEB_CLIENT_ID?.trim() || "herder",
     BOT_MENTION_PREFIX: process.env.BOT_MENTION_PREFIX?.trim().toLowerCase() || "!herder",

@@ -29,6 +29,7 @@ Recommended for normal bot replies:
 Optional:
 
 - `PORT` (default: `3000`)
+- `CHAT_PROTOCOL` (default: `whatsapp`)
 - `WA_WEB_CLIENT_ID` (default: `herder`)
 - `BOT_MENTION_PREFIX` (default: `!herder`)
 - `OPENROUTER_MODEL` (default: `openrouter/auto`)
@@ -91,13 +92,16 @@ Returns health + WhatsApp readiness:
 ```json
 {
   "ok": true,
+  "protocol": "whatsapp",
   "ready": false,
+  "hasSetupCode": false,
   "hasQr": false
 }
 ```
 
-- `ready`: WhatsApp client authenticated and connected
-- `hasQr`: a QR string is currently available for pairing
+- `ready`: protocol runtime authenticated and connected
+- `hasSetupCode`: setup token/code is currently available for pairing/auth
+- `hasQr`: legacy alias for WhatsApp clients
 
 ### `GET /setup/qr`
 
@@ -142,11 +146,27 @@ Session/auth files are stored under `apps/whatsapp-web-bot/.wwebjs_auth/` by `Lo
 
 ### Built-in Tooling
 
-The OpenRouter request includes a built-in no-argument tool:
+The OpenRouter request supports a generic channel tool interface:
+
+- `list_channels`
+- `get_current_channel`
+
+The WhatsApp adapter currently overrides these with WhatsApp-specific tool names for compatibility:
 
 - `list_whatsapp_group_chats`: "List the whatsapp group chats this user belongs to"
+- `get_current_whatsapp_group_chat`: "Get the whatsapp group chat for the current message"
 
 When the model chooses that tool, the bot returns group chat summaries in `{ id, name }` format from the authenticated WhatsApp account.
+
+## Protocol Structure
+
+Protocol implementations are now isolated under `src/protocols/`.
+
+- `src/protocols/types.ts`: generic runtime and channel/tool interfaces
+- `src/protocols/index.ts`: adapter registry/factory
+- `src/protocols/whatsapp/`: WhatsApp runtime and setup routes
+
+This layout is intended to make future protocol adapters (for example Teams/Discord/IRC) plug in behind the same generic interfaces.
 
 ## Troubleshooting
 
