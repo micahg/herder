@@ -8,6 +8,7 @@ const mockState = vi.hoisted(() => {
     destroy: vi.fn(async () => {}),
     removeAllListeners: vi.fn(),
     on: vi.fn(),
+    sendMessage: vi.fn(async () => ({ id: "wamid.test" })),
     generateReplyFromOpenRouter: vi.fn(async () => "bot reply"),
   };
 });
@@ -28,6 +29,7 @@ vi.mock("whatsapp-web.js", () => {
     initialize = mockState.initialize;
     destroy = mockState.destroy;
     removeAllListeners = mockState.removeAllListeners;
+    sendMessage = mockState.sendMessage;
 
     constructor(_options: unknown) {}
   }
@@ -70,6 +72,7 @@ afterEach(() => {
   mockState.destroy.mockClear();
   mockState.removeAllListeners.mockClear();
   mockState.on.mockClear();
+  mockState.sendMessage.mockClear();
   mockState.generateReplyFromOpenRouter.mockClear();
 });
 
@@ -152,6 +155,7 @@ describe("createWhatsAppRuntime message_create", () => {
         listChannels: expect.any(Function),
         getCurrentChannel: expect.any(Function),
         listChatMembers: expect.any(Function),
+        sendMessageToContact: expect.any(Function),
       })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");
@@ -289,8 +293,67 @@ describe("createWhatsAppRuntime message_create", () => {
         listChannels: expect.any(Function),
         getCurrentChannel: expect.any(Function),
         listChatMembers: expect.any(Function),
+        sendMessageToContact: expect.any(Function),
       })
     );
     expect(reply).toHaveBeenCalledWith("bot reply");
+  });
+
+  it("adds assistant disclosure when sending contact messages on behalf of user", async () => {
+    const runtime = createWhatsAppRuntime(env());
+    await runtime.initialize();
+
+    const onReady = mockState.on.mock.calls.find(([event]) => event === "ready")?.[1] as
+      | (() => void)
+      | undefined;
+    onReady?.();
+
+    const onMessageCreate = mockState.on.mock.calls.find(
+      ([event]) => event === "message_create"
+    )?.[1] as
+      | ((message: {
+          fromMe: boolean;
+          from: string;
+          to: string;
+          type: string;
+          body: string;
+          reply: (text: string) => Promise<void>;
+        }) => Promise<void>)
+      | undefined;
+
+    const reply = vi.fn(async () => {});
+
+    await onMessageCreate?.({
+      fromMe: true,
+      from: "15551234567@c.us",
+      to: "15551234567@c.us",
+      type: "chat",
+      body: "!herder test",
+      reply,
+    });
+
+    const firstGenerateReplyCall = mockState.generateReplyFromOpenRouter.mock.calls.find(
+      () => true
+    ) as unknown[] | undefined;
+
+    const toolContext = firstGenerateReplyCall?.[2] as
+      | {
+          sendMessageToContact?: (input: {
+            contactId: string;
+            message: string;
+          }) => Promise<{ ok: boolean }>;
+        }
+      | undefined;
+
+    await toolContext?.sendMessageToContact?.({
+      contactId: "19058023743@c.us",
+      message: "Can you share your availability this week?",
+    });
+
+    expect(mockState.sendMessage).toHaveBeenCalledTimes(1);
+    expect(mockState.sendMessage).toHaveBeenCalledWith(
+      "19058023743@c.us",
+      "Hi, this is Herder, an AI assistant messaging on behalf of the account owner.\n\nCan you share your availability this week?"
+    );
   });
 });
