@@ -280,4 +280,180 @@ describe("generateReplyFromOpenRouter", () => {
       ])
     );
   });
+
+  it("executes send-contact-message tool and returns final assistant text", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      id: "call_4",
+                      type: "function",
+                      function: {
+                        name: "send_message_to_contact",
+                        arguments: JSON.stringify({
+                          contactId: "222@c.us",
+                          message: "can you meet this week?",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "Done, I sent that to Dan." } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+    const sendMessageToContact = vi.fn(async () => ({
+      ok: true,
+      contactId: "222@c.us",
+      resolvedContactId: "222@c.us",
+      message: "can you meet this week?",
+      protocolMessageId: "wamid.abc123",
+    }));
+
+    const reply = await generateReplyFromOpenRouter(env(), "message dan", {
+      sendMessageToContact,
+    });
+
+    expect(reply).toBe("Done, I sent that to Dan.");
+    expect(sendMessageToContact).toHaveBeenCalledTimes(1);
+    expect(sendMessageToContact).toHaveBeenCalledWith({
+      contactId: "222@c.us",
+      message: "can you meet this week?",
+    });
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(firstBody.tools?.[0]?.function?.name).toBe("send_message_to_contact");
+    expect(firstBody.tools?.[0]?.function?.description).toBe(
+      "Send a direct message to a contact by protocol contact ID. Use list_chat_members first when only a name is known. The protocol layer adds AI-assistant disclosure automatically."
+    );
+    expect(firstBody.tools?.[0]?.function?.parameters).toEqual({
+      type: "object",
+      properties: {
+        contactId: {
+          type: "string",
+          description: "Protocol contact ID, such as a WhatsApp JID like 15551234567@c.us",
+        },
+        message: {
+          type: "string",
+          description: "Message text to send to that contact",
+        },
+      },
+      required: ["contactId", "message"],
+      additionalProperties: false,
+    });
+  });
+
+  it("supports multi-round tool calls for lookup-then-send workflows", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      id: "call_lookup",
+                      type: "function",
+                      function: {
+                        name: "list_chat_members",
+                        arguments: JSON.stringify({ chatName: "X Group" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      id: "call_send",
+                      type: "function",
+                      function: {
+                        name: "send_message_to_contact",
+                        arguments: JSON.stringify({
+                          contactId: "222@c.us",
+                          message: "see when he can meet up",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "Sent to Dan in X Group." } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const listChatMembers = vi.fn(async () => [
+      { id: "111@c.us", name: "Alice" },
+      { id: "222@c.us", name: "Dan" },
+    ]);
+
+    const sendMessageToContact = vi.fn(async () => ({
+      ok: true,
+      contactId: "222@c.us",
+      resolvedContactId: "222@c.us",
+      message: "see when he can meet up",
+    }));
+
+    const reply = await generateReplyFromOpenRouter(
+      env(),
+      "message dan from x group to see when he can meet up",
+      {
+        listChatMembers,
+        sendMessageToContact,
+      }
+    );
+
+    expect(reply).toBe("Sent to Dan in X Group.");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(listChatMembers).toHaveBeenCalledWith({ chatName: "X Group" });
+    expect(sendMessageToContact).toHaveBeenCalledWith({
+      contactId: "222@c.us",
+      message: "see when he can meet up",
+    });
+  });
 });

@@ -10,10 +10,14 @@ import type {
   ChannelSummary,
   ChatMemberLookupInput,
   ChatMemberSummary,
+  ContactMessageInput,
+  ContactMessageResult,
   ProtocolRuntime,
 } from "../types";
 
 const { Client, LocalAuth } = whatsappWeb;
+const DEFAULT_ASSISTANT_DISCLOSURE_TEXT =
+  "Hi, this is Herder, an AI assistant messaging on behalf of the account owner.";
 
 export interface WhatsAppRuntime extends ProtocolRuntime {
   getLatestQr(): string | null;
@@ -36,6 +40,9 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
   let initialized = false;
   let shutdownStarted = false;
   const executablePath = resolveBrowserExecutablePath();
+  const assistantDisclosureText =
+    extractNonEmptyString(env.BOT_ASSISTANT_DISCLOSURE_TEXT) ||
+    DEFAULT_ASSISTANT_DISCLOSURE_TEXT;
 
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: env.WA_WEB_CLIENT_ID }),
@@ -71,6 +78,20 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
     }
 
     return listChatMembers(client, input, message);
+  };
+
+  const sendMessageToContactForRuntime = async (
+    input: ContactMessageInput
+  ): Promise<ContactMessageResult> => {
+    if (!initialized || shutdownStarted) {
+      throw new Error("WhatsApp runtime is not initialized");
+    }
+
+    if (!ready) {
+      throw new Error("WhatsApp runtime is not ready");
+    }
+
+    return sendMessageToContact(client, input, assistantDisclosureText);
   };
 
   client.on("qr", (qr) => {
@@ -121,7 +142,8 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
         env,
         message,
         listGroupChatsForRuntime,
-        listChatMembersForRuntime
+        listChatMembersForRuntime,
+        sendMessageToContactForRuntime
       );
     } catch (error) {
       console.error("Failed to handle outgoing self WhatsApp message", error);
@@ -234,7 +256,10 @@ async function maybeReply(
   listChatMembersForRuntime: (
     input: ChatMemberLookupInput,
     message: Message
-  ) => Promise<WhatsAppChatMemberSummary[]>
+  ) => Promise<WhatsAppChatMemberSummary[]>,
+  sendMessageToContactForRuntime: (
+    input: ContactMessageInput
+  ) => Promise<ContactMessageResult>
 ): Promise<void> {
   if (!message.fromMe) {
     return;
@@ -267,16 +292,20 @@ async function maybeReply(
     listChannels: listGroupChatsForRuntime,
     getCurrentChannel: () => getCurrentWhatsAppGroupChat(message),
     listChatMembers: (input) => listChatMembersForRuntime(input || {}, message),
+    sendMessageToContact: (input) => sendMessageToContactForRuntime(input || {}),
     toolNames: {
       listChannels: "list_whatsapp_group_chats",
       getCurrentChannel: "get_current_whatsapp_group_chat",
       listChatMembers: "list_whatsapp_chat_members",
+      sendMessageToContact: "send_whatsapp_message_to_contact",
     },
     toolDescriptions: {
       listChannels: "List the name and ID of each whatsapp group chats this user belongs to",
       getCurrentChannel: "Get the name and ID of the whatsapp group chat for the current message",
       listChatMembers:
         "List the name and ID of each member in a whatsapp group chat. Accepts optional chatId and chatName; defaults to current chat when omitted.",
+      sendMessageToContact:
+        "Send a WhatsApp direct message to a contact by contact ID. Use list_whatsapp_chat_members to resolve IDs from names before calling.",
     },
   });
   await message.reply(reply);
@@ -625,6 +654,84 @@ function buildContactLookupCandidates(id: string): string[] {
   }
 
   return Array.from(new Set(candidates));
+}
+
+async function sendMessageToContact(
+  client: InstanceType<typeof Client>,
+  input: ContactMessageInput,
+  assistantDisclosureText: string
+): Promise<ContactMessageResult> {
+  const contactId = extractNonEmptyString(input.contactId);
+  const message = extractNonEmptyString(input.message);
+  const outboundMessage = withAssistantDisclosure(message, assistantDisclosureText);
+
+  if (!contactId || !outboundMessage) {
+    return {
+      ok: false,
+      contactId,
+      message: outboundMessage,
+      error: "contactId and message are required",
+    };
+  }
+
+  const candidates = buildContactLookupCandidates(contactId);
+  let lastErrorMessage = "";
+
+  for (const candidateId of candidates) {
+    try {
+      const sent = await client.sendMessage(candidateId, outboundMessage);
+      const protocolMessageId = extractSentMessageId(sent);
+
+      return {
+        ok: true,
+        contactId,
+        resolvedContactId: candidateId,
+        message: outboundMessage,
+        ...(protocolMessageId ? { protocolMessageId } : {}),
+      };
+    } catch (error) {
+      lastErrorMessage = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return {
+    ok: false,
+    contactId,
+    message: outboundMessage,
+    error: lastErrorMessage || "Failed to send message to contact",
+  };
+}
+
+function withAssistantDisclosure(message: string, disclosureText: string): string {
+  const normalizedMessage = message.trimStart().toLowerCase();
+  const normalizedDisclosure = disclosureText.trim().toLowerCase();
+
+  if (normalizedMessage.startsWith(normalizedDisclosure)) {
+    return message;
+  }
+
+  return `${disclosureText}\n\n${message}`;
+}
+
+function extractSentMessageId(sentMessage: unknown): string {
+  if (!sentMessage || typeof sentMessage !== "object") {
+    return "";
+  }
+
+  const rawId = (sentMessage as { id?: unknown }).id;
+  if (typeof rawId === "string") {
+    return rawId;
+  }
+
+  if (!rawId || typeof rawId !== "object") {
+    return "";
+  }
+
+  return (
+    extractNonEmptyString((rawId as { _serialized?: unknown })._serialized) ||
+    extractNonEmptyString((rawId as { id?: unknown }).id) ||
+    ""
+  );
 }
 
 function extractParticipantId(participant: unknown): string {

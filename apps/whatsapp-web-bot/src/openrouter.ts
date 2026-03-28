@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import type {
+  ContactMessageInput,
   ChatMemberLookupInput,
   OpenRouterProtocolToolDescriptions,
   OpenRouterProtocolToolNames,
@@ -10,6 +11,8 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "openrouter/auto";
 const DEFAULT_SYSTEM_PROMPT =
   "You are a concise, friendly assistant replying to chat users. Keep answers practical and brief unless they ask for detail.";
+const MAX_TOOL_ROUNDS = 6;
+const TOOL_DEBUG_ENABLED = isTruthyEnvValue(process.env.OPENROUTER_TOOL_DEBUG);
 
 interface OpenRouterResponse {
   choices?: Array<{
@@ -44,6 +47,7 @@ const DEFAULT_TOOL_NAMES: OpenRouterProtocolToolNames = {
   listChannels: "list_channels",
   getCurrentChannel: "get_current_channel",
   listChatMembers: "list_chat_members",
+  sendMessageToContact: "send_message_to_contact",
 };
 
 const DEFAULT_TOOL_DESCRIPTIONS: OpenRouterProtocolToolDescriptions = {
@@ -51,6 +55,8 @@ const DEFAULT_TOOL_DESCRIPTIONS: OpenRouterProtocolToolDescriptions = {
   getCurrentChannel: "Get details about the current channel for this message",
   listChatMembers:
     "List name and ID for chat members. Provide chatId and/or chatName to target a specific chat; omit both for current chat.",
+  sendMessageToContact:
+    "Send a direct message to a contact by protocol contact ID. Use list_chat_members first when only a name is known. The protocol layer adds AI-assistant disclosure automatically.",
 };
 
 type JsonSchemaObject = {
@@ -85,37 +91,66 @@ export async function generateReplyFromOpenRouter(
     { role: "user", content: userMessage },
   ];
   const tools = buildTools(toolContext);
+  const workflowInstruction = buildToolWorkflowInstruction(toolContext);
+  if (workflowInstruction) {
+    messages.splice(1, 0, { role: "system", content: workflowInstruction });
+  }
+  const conversationMessages = [...messages];
 
-  const firstPassData = await requestOpenRouterCompletion(env, {
-    model,
-    messages,
-    tools,
-  });
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+    logToolDebug("openrouter.request", {
+      round: round + 1,
+      messageCount: conversationMessages.length,
+      recentMessages: summarizeRecentMessages(conversationMessages),
+    });
 
-  const firstMessage = firstPassData.choices?.[0]?.message;
-  const toolCalls = firstMessage?.tool_calls || [];
-  if (toolCalls.length === 0) {
-    return extractAssistantText(firstPassData);
+    const responseData = await requestOpenRouterCompletion(env, {
+      model,
+      messages: conversationMessages,
+      tools,
+    });
+
+    const responseMessage = responseData.choices?.[0]?.message;
+    const toolCalls = responseMessage?.tool_calls || [];
+    logToolDebug("openrouter.response", {
+      round: round + 1,
+      toolCallCount: toolCalls.length,
+      toolCalls: toolCalls.map((toolCall) => ({
+        id: toolCall.id || "missing-tool-call-id",
+        name: toolCall.function?.name || "unknown",
+        argumentsPreview: safePreview(toolCall.function?.arguments),
+      })),
+      assistantContentPreview: safePreview(normalizeAssistantContent(responseMessage?.content)),
+    });
+
+    if (toolCalls.length === 0) {
+      return extractAssistantText(responseData);
+    }
+
+    const assistantToolMessage: OpenRouterMessage = {
+      role: "assistant",
+      content: normalizeAssistantContent(responseMessage?.content),
+      tool_calls: toolCalls,
+    };
+
+    const toolResultMessages = await executeToolCalls(toolCalls, toolContext);
+    logToolDebug("openrouter.tool_results", {
+      round: round + 1,
+      results: toolResultMessages.map((message) => ({
+        toolCallId: message.tool_call_id || "missing-tool-call-id",
+        name: message.name || "unknown",
+        contentPreview: safePreview(message.content),
+      })),
+    });
+
+    if (toolResultMessages.length === 0) {
+      return extractAssistantText(responseData);
+    }
+
+    conversationMessages.push(assistantToolMessage, ...toolResultMessages);
   }
 
-  const toolResultMessages = await executeToolCalls(toolCalls, toolContext);
-  if (toolResultMessages.length === 0) {
-    return extractAssistantText(firstPassData);
-  }
-
-  const assistantToolMessage: OpenRouterMessage = {
-    role: "assistant",
-    content: normalizeAssistantContent(firstMessage?.content),
-    tool_calls: toolCalls,
-  };
-
-  const secondPassData = await requestOpenRouterCompletion(env, {
-    model,
-    messages: [...messages, assistantToolMessage, ...toolResultMessages],
-    tools,
-  });
-
-  return extractAssistantText(secondPassData);
+  throw new Error(`OpenRouter exceeded max tool rounds (${MAX_TOOL_ROUNDS})`);
 }
 
 function buildTools(toolContext: OpenRouterToolContext): OpenRouterToolDefinition[] {
@@ -177,6 +212,32 @@ function buildTools(toolContext: OpenRouterToolContext): OpenRouterToolDefinitio
     });
   }
 
+  if (toolContext.sendMessageToContact) {
+    tools.push({
+      type: "function",
+      function: {
+        name: toolNames.sendMessageToContact,
+        description: toolDescriptions.sendMessageToContact,
+        parameters: {
+          type: "object",
+          properties: {
+            contactId: {
+              type: "string",
+              description:
+                "Protocol contact ID, such as a WhatsApp JID like 15551234567@c.us",
+            },
+            message: {
+              type: "string",
+              description: "Message text to send to that contact",
+            },
+          },
+          required: ["contactId", "message"],
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -193,6 +254,11 @@ async function executeToolCalls(
 
     if (toolName === toolNames.listChannels && toolContext.listChannels) {
       const groups = await toolContext.listChannels();
+      logToolDebug("tool.listChannels", {
+        toolCallId,
+        count: groups.length,
+        names: groups.map((group) => group.name).slice(0, 12),
+      });
       messages.push({
         role: "tool",
         tool_call_id: toolCallId,
@@ -204,6 +270,11 @@ async function executeToolCalls(
 
     if (toolName === toolNames.getCurrentChannel && toolContext.getCurrentChannel) {
       const group = await toolContext.getCurrentChannel();
+      logToolDebug("tool.getCurrentChannel", {
+        toolCallId,
+        id: group?.id || null,
+        name: group?.name || null,
+      });
       messages.push({
         role: "tool",
         tool_call_id: toolCallId,
@@ -217,11 +288,40 @@ async function executeToolCalls(
       const members = await toolContext.listChatMembers(
         parseChatMemberLookupInput(toolCall.function?.arguments)
       );
+      logToolDebug("tool.listChatMembers", {
+        toolCallId,
+        count: members.length,
+        members: members.slice(0, 20).map((member) => ({
+          id: member.id,
+          name: member.name,
+        })),
+      });
       messages.push({
         role: "tool",
         tool_call_id: toolCallId,
         name: toolName,
         content: JSON.stringify(members),
+      });
+      continue;
+    }
+
+    if (toolName === toolNames.sendMessageToContact && toolContext.sendMessageToContact) {
+      const result = await toolContext.sendMessageToContact(
+        parseContactMessageInput(toolCall.function?.arguments)
+      );
+      logToolDebug("tool.sendMessageToContact", {
+        toolCallId,
+        ok: result.ok,
+        contactId: result.contactId,
+        resolvedContactId: result.resolvedContactId || null,
+        protocolMessageId: result.protocolMessageId || null,
+        error: result.error || null,
+      });
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCallId,
+        name: toolName,
+        content: JSON.stringify(result),
       });
       continue;
     }
@@ -232,9 +332,77 @@ async function executeToolCalls(
       name: toolName,
       content: JSON.stringify({ error: `Unknown tool: ${toolName}` }),
     });
+    logToolDebug("tool.unknown", {
+      toolCallId,
+      name: toolName,
+    });
   }
 
   return messages;
+}
+
+function isTruthyEnvValue(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function summarizeRecentMessages(messages: OpenRouterMessage[]): Array<Record<string, unknown>> {
+  return messages.slice(-4).map((message) => ({
+    role: message.role,
+    name: message.name,
+    toolCallId: message.tool_call_id,
+    toolCallNames: (message.tool_calls || []).map((toolCall) => toolCall.function?.name || "unknown"),
+    contentPreview: safePreview(message.content),
+  }));
+}
+
+function safePreview(value: string | undefined, maxLength = 280): string {
+  if (!value) {
+    return "";
+  }
+
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength)}...`;
+}
+
+function logToolDebug(event: string, payload: Record<string, unknown>): void {
+  if (!TOOL_DEBUG_ENABLED) {
+    return;
+  }
+
+  console.debug(`[openrouter-debug] ${event}`, payload);
+}
+
+function parseContactMessageInput(rawArgs: string | undefined): ContactMessageInput {
+  if (!rawArgs) {
+    return {};
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawArgs);
+  } catch {
+    return {};
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return {};
+  }
+
+  const contactId = normalizeOptionalString((parsed as { contactId?: unknown }).contactId);
+  const message = normalizeOptionalString((parsed as { message?: unknown }).message);
+
+  return {
+    ...(contactId ? { contactId } : {}),
+    ...(message ? { message } : {}),
+  };
 }
 
 function parseChatMemberLookupInput(rawArgs: string | undefined): ChatMemberLookupInput {
@@ -285,6 +453,23 @@ function resolveToolDescriptions(
     ...DEFAULT_TOOL_DESCRIPTIONS,
     ...(toolContext.toolDescriptions || {}),
   };
+}
+
+function buildToolWorkflowInstruction(toolContext: OpenRouterToolContext): string {
+  const toolNames = resolveToolNames(toolContext);
+
+  if (!toolContext.listChatMembers || !toolContext.sendMessageToContact) {
+    return "";
+  }
+
+  return [
+    "Guidance for contact messaging requests:",
+    "When the user asks to message a person in a chat and only provides a name, the usual approach is:",
+    `use ${toolNames.listChatMembers} for that chat, extract the best case-insensitive member name match (exact first, then substring),`,
+    `and use ${toolNames.sendMessageToContact} with that matched member id and the intended message text.`,
+    "If the match is ambiguous, ask a short clarification question with candidate names.",
+    "If the member id is already known, send directly without unnecessary lookup.",
+  ].join(" ");
 }
 
 function normalizeAssistantContent(

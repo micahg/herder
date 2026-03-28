@@ -16,6 +16,20 @@ export interface ChatMemberLookupInput {
   chatName?: string;
 }
 
+export interface ContactMessageInput {
+  contactId?: string;
+  message?: string;
+}
+
+export interface ContactMessageResult {
+  ok: boolean;
+  contactId: string;
+  message: string;
+  resolvedContactId?: string;
+  protocolMessageId?: string;
+  error?: string;
+}
+
 export interface ProtocolRuntime {
   initialize(): Promise<void>;
   shutdown(): Promise<void>;
@@ -28,18 +42,21 @@ export interface OpenRouterProtocolToolNames {
   listChannels: string;
   getCurrentChannel: string;
   listChatMembers: string;
+  sendMessageToContact: string;
 }
 
 export interface OpenRouterProtocolToolDescriptions {
   listChannels: string;
   getCurrentChannel: string;
   listChatMembers: string;
+  sendMessageToContact: string;
 }
 
 export interface ProtocolToolContext {
   listChannels?: () => Promise<ChannelSummary[]>;
   getCurrentChannel?: () => Promise<ChannelSummary | null>;
   listChatMembers?: (input?: ChatMemberLookupInput) => Promise<ChatMemberSummary[]>;
+  sendMessageToContact?: (input?: ContactMessageInput) => Promise<ContactMessageResult>;
   toolNames?: Partial<OpenRouterProtocolToolNames>;
   toolDescriptions?: Partial<OpenRouterProtocolToolDescriptions>;
 }

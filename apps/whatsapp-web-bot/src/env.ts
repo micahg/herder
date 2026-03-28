@@ -4,6 +4,7 @@ export interface Env {
   WA_WEB_ADMIN_SETUP_TOKEN: string;
   WA_WEB_CLIENT_ID: string;
   BOT_MENTION_PREFIX: string;
+  BOT_ASSISTANT_DISCLOSURE_TEXT?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
   OPENROUTER_SYSTEM_PROMPT?: string;
@@ -49,6 +50,7 @@ export function loadEnv(): Env {
     WA_WEB_ADMIN_SETUP_TOKEN: resolveSetupToken(),
     WA_WEB_CLIENT_ID: process.env.WA_WEB_CLIENT_ID?.trim() || "herder",
     BOT_MENTION_PREFIX: process.env.BOT_MENTION_PREFIX?.trim().toLowerCase() || "!herder",
+    BOT_ASSISTANT_DISCLOSURE_TEXT: process.env.BOT_ASSISTANT_DISCLOSURE_TEXT?.trim(),
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY?.trim(),
     OPENROUTER_MODEL: process.env.OPENROUTER_MODEL?.trim(),
     OPENROUTER_SYSTEM_PROMPT: process.env.OPENROUTER_SYSTEM_PROMPT?.trim(),
