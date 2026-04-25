@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "set -a; [ -f .env ] && . ./.env; set +a; NODE_OPTIONS='--inspect=9229' tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "set -a; [ -f .env ] && . ./.env; set +a; node dist/index.js",
+    "start": "set -a; [ -f .env ] && . ./.env; set +a; tsx src/index.ts",
     "check": "tsc --noEmit",
     "test": "vitest run"
   },

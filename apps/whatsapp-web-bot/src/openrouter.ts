@@ -1,17 +1,21 @@
 import type { Env } from "./env";
 import type {
+  CancelOutreachWorkflowInput,
+  GetOutreachWorkflowStatusInput,
   ContactMessageInput,
   ChatMemberLookupInput,
+  OutreachParticipantInput,
   OpenRouterProtocolToolDescriptions,
   OpenRouterProtocolToolNames,
   ProtocolToolContext,
+  StartOutreachWorkflowInput,
 } from "./protocols/types";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "openrouter/auto";
 const DEFAULT_SYSTEM_PROMPT =
   "You are a concise, friendly assistant replying to chat users. Keep answers practical and brief unless they ask for detail.";
-const MAX_TOOL_ROUNDS = 6;
+const DEFAULT_MAX_TOOL_ROUNDS = 12;
 const TOOL_DEBUG_ENABLED = isTruthyEnvValue(process.env.OPENROUTER_TOOL_DEBUG);
 
 interface OpenRouterResponse {
@@ -48,6 +52,9 @@ const DEFAULT_TOOL_NAMES: OpenRouterProtocolToolNames = {
   getCurrentChannel: "get_current_channel",
   listChatMembers: "list_chat_members",
   sendMessageToContact: "send_message_to_contact",
+  startOutreachWorkflow: "start_outreach_workflow",
+  getOutreachWorkflowStatus: "get_outreach_workflow_status",
+  cancelOutreachWorkflow: "cancel_outreach_workflow",
 };
 
 const DEFAULT_TOOL_DESCRIPTIONS: OpenRouterProtocolToolDescriptions = {
@@ -57,6 +64,11 @@ const DEFAULT_TOOL_DESCRIPTIONS: OpenRouterProtocolToolDescriptions = {
     "List name and ID for chat members. Provide chatId and/or chatName to target a specific chat; omit both for current chat.",
   sendMessageToContact:
     "Send a direct message to a contact by protocol contact ID. Use list_chat_members first when only a name is known. The protocol layer adds AI-assistant disclosure automatically.",
+  startOutreachWorkflow:
+    "Start an asynchronous outreach workflow that messages multiple participants and tracks their responses for later aggregation.",
+  getOutreachWorkflowStatus:
+    "Get latest status for an outreach workflow, including who responded and summary counts.",
+  cancelOutreachWorkflow: "Cancel an active outreach workflow by workflow ID.",
 };
 
 type JsonSchemaObject = {
@@ -91,13 +103,14 @@ export async function generateReplyFromOpenRouter(
     { role: "user", content: userMessage },
   ];
   const tools = buildTools(toolContext);
+  const maxToolRounds = resolveMaxToolRounds(env.OPENROUTER_MAX_TOOL_ROUNDS);
   const workflowInstruction = buildToolWorkflowInstruction(toolContext);
   if (workflowInstruction) {
     messages.splice(1, 0, { role: "system", content: workflowInstruction });
   }
   const conversationMessages = [...messages];
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+  for (let round = 0; round < maxToolRounds; round += 1) {
     logToolDebug("openrouter.request", {
       round: round + 1,
       messageCount: conversationMessages.length,
@@ -150,7 +163,7 @@ export async function generateReplyFromOpenRouter(
     conversationMessages.push(assistantToolMessage, ...toolResultMessages);
   }
 
-  throw new Error(`OpenRouter exceeded max tool rounds (${MAX_TOOL_ROUNDS})`);
+  throw new Error(`OpenRouter exceeded max tool rounds (${maxToolRounds})`);
 }
 
 function buildTools(toolContext: OpenRouterToolContext): OpenRouterToolDefinition[] {
@@ -238,6 +251,108 @@ function buildTools(toolContext: OpenRouterToolContext): OpenRouterToolDefinitio
     });
   }
 
+  if (toolContext.startOutreachWorkflow) {
+    tools.push({
+      type: "function",
+      function: {
+        name: toolNames.startOutreachWorkflow,
+        description: toolDescriptions.startOutreachWorkflow,
+        parameters: {
+          type: "object",
+          properties: {
+            topic: {
+              type: "string",
+              description: "Short campaign topic, like Weekly standup scheduling",
+            },
+            question: {
+              type: "string",
+              description: "Question each participant should answer",
+            },
+            participants: {
+              type: "array",
+              description:
+                "Participants to contact, each with at least id and optional protocol/name",
+              items: {
+                type: "object",
+                properties: {
+                  protocol: { type: "string" },
+                  id: { type: "string" },
+                  name: { type: "string" },
+                },
+                required: ["id"],
+                additionalProperties: false,
+              },
+            },
+            responseWindowHours: {
+              type: "number",
+              description: "How long to wait for responses before expiry",
+            },
+            originChannelId: {
+              type: "string",
+              description: "Channel ID where status updates can be posted",
+            },
+            originChannelName: {
+              type: "string",
+              description: "Human-readable channel name for context",
+            },
+            evaluationMode: {
+              type: "string",
+              description:
+                "Optional aggregation hint such as availability, survey, or generic",
+            },
+          },
+          required: ["topic", "question", "participants"],
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
+  if (toolContext.getOutreachWorkflowStatus) {
+    tools.push({
+      type: "function",
+      function: {
+        name: toolNames.getOutreachWorkflowStatus,
+        description: toolDescriptions.getOutreachWorkflowStatus,
+        parameters: {
+          type: "object",
+          properties: {
+            workflowId: {
+              type: "string",
+              description: "Workflow ID returned from start_outreach_workflow",
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
+  if (toolContext.cancelOutreachWorkflow) {
+    tools.push({
+      type: "function",
+      function: {
+        name: toolNames.cancelOutreachWorkflow,
+        description: toolDescriptions.cancelOutreachWorkflow,
+        parameters: {
+          type: "object",
+          properties: {
+            workflowId: {
+              type: "string",
+              description: "Workflow ID to cancel",
+            },
+            reason: {
+              type: "string",
+              description: "Optional cancellation reason",
+            },
+          },
+          required: ["workflowId"],
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -316,6 +431,69 @@ async function executeToolCalls(
         resolvedContactId: result.resolvedContactId || null,
         protocolMessageId: result.protocolMessageId || null,
         error: result.error || null,
+      });
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCallId,
+        name: toolName,
+        content: JSON.stringify(result),
+      });
+      continue;
+    }
+
+    if (toolName === toolNames.startOutreachWorkflow && toolContext.startOutreachWorkflow) {
+      const result = await toolContext.startOutreachWorkflow(
+        parseStartOutreachWorkflowInput(toolCall.function?.arguments)
+      );
+      logToolDebug("tool.startOutreachWorkflow", {
+        toolCallId,
+        ok: result.ok,
+        workflowId: result.workflowId,
+        status: result.status,
+        participantCount: result.participants.length,
+      });
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCallId,
+        name: toolName,
+        content: JSON.stringify(result),
+      });
+      continue;
+    }
+
+    if (
+      toolName === toolNames.getOutreachWorkflowStatus &&
+      toolContext.getOutreachWorkflowStatus
+    ) {
+      const result = await toolContext.getOutreachWorkflowStatus(
+        parseGetOutreachWorkflowStatusInput(toolCall.function?.arguments)
+      );
+      logToolDebug("tool.getOutreachWorkflowStatus", {
+        toolCallId,
+        ok: result.ok,
+        workflowId: result.workflowId,
+        status: result.status,
+        respondedCount: result.respondedCount,
+        pendingCount: result.pendingCount,
+      });
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCallId,
+        name: toolName,
+        content: JSON.stringify(result),
+      });
+      continue;
+    }
+
+    if (toolName === toolNames.cancelOutreachWorkflow && toolContext.cancelOutreachWorkflow) {
+      const result = await toolContext.cancelOutreachWorkflow(
+        parseCancelOutreachWorkflowInput(toolCall.function?.arguments)
+      );
+      logToolDebug("tool.cancelOutreachWorkflow", {
+        toolCallId,
+        ok: result.ok,
+        workflowId: result.workflowId,
+        status: result.status,
       });
       messages.push({
         role: "tool",
@@ -430,6 +608,116 @@ function parseChatMemberLookupInput(rawArgs: string | undefined): ChatMemberLook
   };
 }
 
+function parseStartOutreachWorkflowInput(rawArgs: string | undefined): StartOutreachWorkflowInput {
+  const parsed = parseJsonObject(rawArgs);
+  if (!parsed) {
+    return {};
+  }
+
+  const topic = normalizeOptionalString(parsed.topic);
+  const question = normalizeOptionalString(parsed.question);
+  const participants = normalizeParticipants(parsed.participants);
+  const responseWindowHours = normalizeOptionalNumber(parsed.responseWindowHours);
+  const originChannelId = normalizeOptionalString(parsed.originChannelId);
+  const originChannelName = normalizeOptionalString(parsed.originChannelName);
+  const evaluationMode = normalizeOptionalString(parsed.evaluationMode);
+
+  return {
+    ...(topic ? { topic } : {}),
+    ...(question ? { question } : {}),
+    ...(participants.length > 0 ? { participants } : {}),
+    ...(typeof responseWindowHours === "number" ? { responseWindowHours } : {}),
+    ...(originChannelId ? { originChannelId } : {}),
+    ...(originChannelName ? { originChannelName } : {}),
+    ...(evaluationMode ? { evaluationMode } : {}),
+  };
+}
+
+function parseGetOutreachWorkflowStatusInput(
+  rawArgs: string | undefined
+): GetOutreachWorkflowStatusInput {
+  const parsed = parseJsonObject(rawArgs);
+  if (!parsed) {
+    return {};
+  }
+
+  const workflowId = normalizeOptionalString(parsed.workflowId);
+  return {
+    ...(workflowId ? { workflowId } : {}),
+  };
+}
+
+function parseCancelOutreachWorkflowInput(
+  rawArgs: string | undefined
+): CancelOutreachWorkflowInput {
+  const parsed = parseJsonObject(rawArgs);
+  if (!parsed) {
+    return {};
+  }
+
+  const workflowId = normalizeOptionalString(parsed.workflowId);
+  const reason = normalizeOptionalString(parsed.reason);
+  return {
+    ...(workflowId ? { workflowId } : {}),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+function parseJsonObject(rawArgs: string | undefined): Record<string, unknown> | null {
+  if (!rawArgs) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawArgs);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
+function normalizeParticipants(value: unknown): OutreachParticipantInput[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const participant = entry as Record<string, unknown>;
+      const id = normalizeOptionalString(participant.id);
+      if (!id) {
+        return null;
+      }
+
+      const protocol = normalizeOptionalString(participant.protocol);
+      const name = normalizeOptionalString(participant.name);
+      return {
+        ...(protocol ? { protocol } : {}),
+        id,
+        ...(name ? { name } : {}),
+      };
+    })
+    .filter((participant): participant is OutreachParticipantInput => Boolean(participant));
+}
+
+function normalizeOptionalNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return value;
+}
+
 function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -462,14 +750,48 @@ function buildToolWorkflowInstruction(toolContext: OpenRouterToolContext): strin
     return "";
   }
 
-  return [
+  const baseInstruction = [
     "Guidance for contact messaging requests:",
     "When the user asks to message a person in a chat and only provides a name, the usual approach is:",
     `use ${toolNames.listChatMembers} for that chat, extract the best case-insensitive member name match (exact first, then substring),`,
     `and use ${toolNames.sendMessageToContact} with that matched member id and the intended message text.`,
     "If the match is ambiguous, ask a short clarification question with candidate names.",
     "If the member id is already known, send directly without unnecessary lookup.",
-  ].join(" ");
+  ];
+
+  const outreachInstruction =
+    toolContext.startOutreachWorkflow &&
+    toolContext.getOutreachWorkflowStatus &&
+    toolContext.cancelOutreachWorkflow
+      ? [
+          "Guidance for outreach workflows:",
+          `for multi-person coordination or surveys, call ${toolNames.startOutreachWorkflow} once with participants, topic, question, and origin channel info.`,
+          `then call ${toolNames.getOutreachWorkflowStatus} to report progress and summarize responses without re-contacting everyone in the same turn.`,
+          `if the user asks to stop, call ${toolNames.cancelOutreachWorkflow}.`,
+          "If response window is missing for scheduling requests, ask a short follow-up before starting outreach.",
+        ]
+      : [];
+
+  return [...baseInstruction, ...outreachInstruction].join(" ");
+}
+
+function resolveMaxToolRounds(value: number | undefined): number {
+  const candidate = typeof value === "number" ? value : undefined;
+
+  if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+    return DEFAULT_MAX_TOOL_ROUNDS;
+  }
+
+  const rounded = Math.floor(candidate);
+  if (rounded < 1) {
+    return 1;
+  }
+
+  if (rounded > 64) {
+    return 64;
+  }
+
+  return rounded;
 }
 
 function normalizeAssistantContent(

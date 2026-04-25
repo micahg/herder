@@ -5,7 +5,7 @@ import {
   createWhatsAppRuntime,
   registerWhatsAppSetupRoutes,
   type WhatsAppRuntime,
-} from "./whatsapp";
+} from "./whatsapp/index";
 
 export interface ProtocolAdapter {
   name: string;
