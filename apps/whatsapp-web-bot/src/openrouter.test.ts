@@ -456,4 +456,130 @@ describe("generateReplyFromOpenRouter", () => {
       message: "see when he can meet up",
     });
   });
+
+  it("executes start outreach workflow tool and returns final assistant text", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      id: "call_start_workflow",
+                      type: "function",
+                      function: {
+                        name: "start_outreach_workflow",
+                        arguments: JSON.stringify({
+                          topic: "Schedule group session",
+                          question: "What times work this week?",
+                          participants: [
+                            { protocol: "whatsapp", id: "111@c.us", name: "Alice" },
+                            { protocol: "whatsapp", id: "222@c.us", name: "Bob" },
+                          ],
+                          responseWindowHours: 48,
+                          originChannelId: "1203@g.us",
+                          originChannelName: "DND",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "Started workflow and sent outreach messages." } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const startOutreachWorkflow = vi.fn(async () => ({
+      ok: true,
+      workflowId: "wf_123",
+      status: "active" as const,
+      topic: "Schedule group session",
+      question: "What times work this week?",
+      createdAt: "2026-03-30T00:00:00.000Z",
+      responseDeadlineAt: "2026-04-01T00:00:00.000Z",
+      participants: [],
+      summary: "Workflow wf_123 is active.",
+    }));
+
+    const reply = await generateReplyFromOpenRouter(env(), "coordinate scheduling", {
+      startOutreachWorkflow,
+    });
+
+    expect(reply).toBe("Started workflow and sent outreach messages.");
+    expect(startOutreachWorkflow).toHaveBeenCalledTimes(1);
+    expect(startOutreachWorkflow).toHaveBeenCalledWith({
+      topic: "Schedule group session",
+      question: "What times work this week?",
+      participants: [
+        { protocol: "whatsapp", id: "111@c.us", name: "Alice" },
+        { protocol: "whatsapp", id: "222@c.us", name: "Bob" },
+      ],
+      responseWindowHours: 48,
+      originChannelId: "1203@g.us",
+      originChannelName: "DND",
+    });
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(firstBody.tools?.[0]?.function?.name).toBe("start_outreach_workflow");
+  });
+
+  it("respects OPENROUTER_MAX_TOOL_ROUNDS from env", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                      name: "list_channels",
+                      arguments: "{}",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const listChannels = vi.fn(async () => [{ id: "1@g.us", name: "Family" }]);
+
+    await expect(
+      generateReplyFromOpenRouter(
+        env({
+          OPENROUTER_MAX_TOOL_ROUNDS: 1,
+        }),
+        "what groups am i in",
+        { listChannels }
+      )
+    ).rejects.toThrow("OpenRouter exceeded max tool rounds (1)");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(listChannels).toHaveBeenCalledTimes(1);
+  });
 });

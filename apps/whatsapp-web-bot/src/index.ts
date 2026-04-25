@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { createServer } from "node:net";
 import { loadEnv } from "./env";
-import { getProtocolAdapter } from "./protocols";
+import { getProtocolAdapter } from "./protocols/index";
 
 const env = loadEnv();
 const protocolAdapter = getProtocolAdapter(env.CHAT_PROTOCOL);
@@ -10,7 +10,7 @@ const runtime = protocolAdapter.createRuntime(env);
 const app = new Hono();
 let shutdownPromise: Promise<void> | null = null;
 
-runtime.initialize().catch(async (error) => {
+runtime.initialize().catch(async (error: unknown) => {
   console.error("Failed to initialize WhatsApp runtime", error);
   await shutdown("runtime initialization failure", 1);
 });

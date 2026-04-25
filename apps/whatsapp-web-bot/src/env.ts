@@ -10,6 +10,7 @@ export interface Env {
   OPENROUTER_SYSTEM_PROMPT?: string;
   OPENROUTER_SITE_URL?: string;
   OPENROUTER_APP_TITLE?: string;
+  OPENROUTER_MAX_TOOL_ROUNDS?: number;
 }
 
 function requireString(name: string): string {
@@ -56,5 +57,22 @@ export function loadEnv(): Env {
     OPENROUTER_SYSTEM_PROMPT: process.env.OPENROUTER_SYSTEM_PROMPT?.trim(),
     OPENROUTER_SITE_URL: process.env.OPENROUTER_SITE_URL?.trim(),
     OPENROUTER_APP_TITLE: process.env.OPENROUTER_APP_TITLE?.trim(),
+    OPENROUTER_MAX_TOOL_ROUNDS: parseOptionalPositiveInt(
+      process.env.OPENROUTER_MAX_TOOL_ROUNDS
+    ),
   };
+}
+
+function parseOptionalPositiveInt(rawValue: string | undefined): number | undefined {
+  const value = rawValue?.trim();
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return parsed;
 }

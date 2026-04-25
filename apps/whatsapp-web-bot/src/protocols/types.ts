@@ -30,6 +30,81 @@ export interface ContactMessageResult {
   error?: string;
 }
 
+export interface OutreachParticipantInput {
+  protocol?: string;
+  id: string;
+  name?: string;
+}
+
+export interface StartOutreachWorkflowInput {
+  topic?: string;
+  question?: string;
+  participants?: OutreachParticipantInput[];
+  responseWindowHours?: number;
+  originChannelId?: string;
+  originChannelName?: string;
+  evaluationMode?: string;
+}
+
+export interface OutreachChildWorkflowStatus {
+  childWorkflowId: string;
+  participant: OutreachParticipantInput;
+  status: "pending" | "sent" | "responded" | "failed" | "canceled";
+  sentAt?: string;
+  responseText?: string;
+  responseAt?: string;
+  error?: string;
+}
+
+export interface StartOutreachWorkflowResult {
+  ok: boolean;
+  workflowId: string;
+  status: "active" | "completed" | "failed" | "canceled" | "expired";
+  topic: string;
+  question: string;
+  createdAt: string;
+  responseDeadlineAt: string;
+  participants: OutreachChildWorkflowStatus[];
+  summary: string;
+  error?: string;
+}
+
+export interface GetOutreachWorkflowStatusInput {
+  workflowId?: string;
+}
+
+export interface OutreachWorkflowStatusResult {
+  ok: boolean;
+  workflowId: string;
+  status: "active" | "completed" | "failed" | "canceled" | "expired";
+  topic: string;
+  question: string;
+  createdAt: string;
+  responseDeadlineAt: string;
+  participantCount: number;
+  respondedCount: number;
+  pendingCount: number;
+  failedCount: number;
+  participants: OutreachChildWorkflowStatus[];
+  summary: string;
+  error?: string;
+}
+
+export interface CancelOutreachWorkflowInput {
+  workflowId?: string;
+  reason?: string;
+}
+
+export interface CancelOutreachWorkflowResult {
+  ok: boolean;
+  workflowId: string;
+  status: "canceled" | "completed" | "failed" | "expired";
+  canceledAt: string;
+  reason?: string;
+  summary: string;
+  error?: string;
+}
+
 export interface ProtocolRuntime {
   initialize(): Promise<void>;
   shutdown(): Promise<void>;
@@ -43,6 +118,9 @@ export interface OpenRouterProtocolToolNames {
   getCurrentChannel: string;
   listChatMembers: string;
   sendMessageToContact: string;
+  startOutreachWorkflow: string;
+  getOutreachWorkflowStatus: string;
+  cancelOutreachWorkflow: string;
 }
 
 export interface OpenRouterProtocolToolDescriptions {
@@ -50,6 +128,9 @@ export interface OpenRouterProtocolToolDescriptions {
   getCurrentChannel: string;
   listChatMembers: string;
   sendMessageToContact: string;
+  startOutreachWorkflow: string;
+  getOutreachWorkflowStatus: string;
+  cancelOutreachWorkflow: string;
 }
 
 export interface ProtocolToolContext {
@@ -57,6 +138,15 @@ export interface ProtocolToolContext {
   getCurrentChannel?: () => Promise<ChannelSummary | null>;
   listChatMembers?: (input?: ChatMemberLookupInput) => Promise<ChatMemberSummary[]>;
   sendMessageToContact?: (input?: ContactMessageInput) => Promise<ContactMessageResult>;
+  startOutreachWorkflow?: (
+    input?: StartOutreachWorkflowInput
+  ) => Promise<StartOutreachWorkflowResult>;
+  getOutreachWorkflowStatus?: (
+    input?: GetOutreachWorkflowStatusInput
+  ) => Promise<OutreachWorkflowStatusResult>;
+  cancelOutreachWorkflow?: (
+    input?: CancelOutreachWorkflowInput
+  ) => Promise<CancelOutreachWorkflowResult>;
   toolNames?: Partial<OpenRouterProtocolToolNames>;
   toolDescriptions?: Partial<OpenRouterProtocolToolDescriptions>;
 }

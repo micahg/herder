@@ -14,6 +14,7 @@ import type {
   ContactMessageResult,
   ProtocolRuntime,
 } from "../types";
+import { createInMemoryOutreachWorkflowManager } from "../../workflows/manager";
 
 const { Client, LocalAuth } = whatsappWeb;
 const DEFAULT_ASSISTANT_DISCLOSURE_TEXT =
@@ -94,6 +95,19 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
     return sendMessageToContact(client, input, assistantDisclosureText);
   };
 
+  const outreachWorkflowManager = createInMemoryOutreachWorkflowManager({
+    protocol: "whatsapp",
+    sendDirectMessage: async (input) => sendMessageToContactForRuntime(input),
+    postChannelMessage: async (input) => {
+      if (!input.channelId || !input.message) {
+        return;
+      }
+
+      await client.sendMessage(input.channelId, input.message);
+    },
+    normalizeContactId: (contactId) => normalizeWhatsAppParticipantId(contactId),
+  });
+
   client.on("qr", (qr) => {
     latestQr = qr;
     ready = false;
@@ -124,8 +138,17 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
   client.on("message", async (message: Message) => {
     console.log(`Received WhatsApp message from ${message.from}: ${message.body}`);
     // Commands are owner-only and are handled exclusively via message_create.
-    // Drop all inbound chat messages from other participants.
-    if (!message.fromMe) {
+    // Treat inbound direct messages as potential outreach workflow responses.
+    if (!message.fromMe && !isGroupJid(message.from || "")) {
+      const status = await outreachWorkflowManager.handleInboundDirectMessage({
+        contactId: message.from || "",
+        message: message.body || "",
+        protocol: "whatsapp",
+      });
+
+      if (status) {
+        console.log(`Updated outreach workflow ${status.workflowId} from inbound DM response`);
+      }
       return;
     }
   });
@@ -143,7 +166,8 @@ export function createWhatsAppRuntime(env: Env): WhatsAppRuntime {
         message,
         listGroupChatsForRuntime,
         listChatMembersForRuntime,
-        sendMessageToContactForRuntime
+        sendMessageToContactForRuntime,
+        outreachWorkflowManager
       );
     } catch (error) {
       console.error("Failed to handle outgoing self WhatsApp message", error);
@@ -259,7 +283,8 @@ async function maybeReply(
   ) => Promise<WhatsAppChatMemberSummary[]>,
   sendMessageToContactForRuntime: (
     input: ContactMessageInput
-  ) => Promise<ContactMessageResult>
+  ) => Promise<ContactMessageResult>,
+  outreachWorkflowManager: ReturnType<typeof createInMemoryOutreachWorkflowManager>
 ): Promise<void> {
   if (!message.fromMe) {
     return;
@@ -293,11 +318,26 @@ async function maybeReply(
     getCurrentChannel: () => getCurrentWhatsAppGroupChat(message),
     listChatMembers: (input) => listChatMembersForRuntime(input || {}, message),
     sendMessageToContact: (input) => sendMessageToContactForRuntime(input || {}),
+    startOutreachWorkflow: async (input) => {
+      const originChannel = await getCurrentWhatsAppGroupChat(message);
+      return outreachWorkflowManager.startOutreachWorkflow({
+        ...(input || {}),
+        ...(input?.originChannelId
+          ? {}
+          : { originChannelId: originChannel?.id || message.from || message.to || "" }),
+        ...(input?.originChannelName ? {} : { originChannelName: originChannel?.name || "" }),
+      });
+    },
+    getOutreachWorkflowStatus: (input) => outreachWorkflowManager.getOutreachWorkflowStatus(input),
+    cancelOutreachWorkflow: (input) => outreachWorkflowManager.cancelOutreachWorkflow(input),
     toolNames: {
       listChannels: "list_whatsapp_group_chats",
       getCurrentChannel: "get_current_whatsapp_group_chat",
       listChatMembers: "list_whatsapp_chat_members",
       sendMessageToContact: "send_whatsapp_message_to_contact",
+      startOutreachWorkflow: "start_whatsapp_outreach_workflow",
+      getOutreachWorkflowStatus: "get_whatsapp_outreach_workflow_status",
+      cancelOutreachWorkflow: "cancel_whatsapp_outreach_workflow",
     },
     toolDescriptions: {
       listChannels: "List the name and ID of each whatsapp group chats this user belongs to",
@@ -306,6 +346,11 @@ async function maybeReply(
         "List the name and ID of each member in a whatsapp group chat. Accepts optional chatId and chatName; defaults to current chat when omitted.",
       sendMessageToContact:
         "Send a WhatsApp direct message to a contact by contact ID. Use list_whatsapp_chat_members to resolve IDs from names before calling.",
+      startOutreachWorkflow:
+        "Start an asynchronous WhatsApp outreach workflow to DM multiple participants and track their responses.",
+      getOutreachWorkflowStatus:
+        "Get latest status for a WhatsApp outreach workflow by workflow ID.",
+      cancelOutreachWorkflow: "Cancel an active WhatsApp outreach workflow by workflow ID.",
     },
   });
   await message.reply(reply);
@@ -841,6 +886,15 @@ function normalizeWhatsAppJid(jid: string): string {
 
   const normalizedUser = rawUser.split(":", 2)[0];
   return `${normalizedUser}@${domain}`;
+}
+
+function normalizeWhatsAppParticipantId(jid: string): string {
+  const [rawUser] = jid.split("@", 2);
+  if (!rawUser) {
+    return "";
+  }
+
+  return rawUser.split(":", 2)[0].trim().toLowerCase();
 }
 
 function isLidJid(jid: string): boolean {
