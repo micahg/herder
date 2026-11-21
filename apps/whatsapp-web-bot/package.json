@@ -11,16 +11,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.3",
-    "hono": "^4.7.5",
+    "@hono/node-server": "^2.1.6",
+    "hono": "^4.13.16",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.31.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@types/qrcode-terminal": "^0.12.2",
-    "tsx": "^4.20.5",
+    "tsx": "^4.23.15",
     "typescript": "^5.8.2",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.11"
   }
 }
